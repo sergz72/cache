@@ -4,17 +4,18 @@ mod resp_parser;
 mod resp_commands;
 mod resp_encoder;
 
+use std::collections::HashMap;
 use std::env::args;
 use std::io::{Error, Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::channel;
 use std::thread::available_parallelism;
 use arguments_parser::{Arguments, IntParameter, SizeParameter, BoolParameter, Switch, StringParameter};
-use crate::work_handler::{Command, create_thread_pool};
+use crate::work_handler::{Command, CommonData, create_thread_pool};
 use ctrlc;
-use crate::resp_encoder::resp_encode;
+use crate::resp_encoder::resp_encode_strings;
 use crate::server::server_start;
 
 fn main() -> Result<(), Error> {
@@ -59,9 +60,9 @@ fn main() -> Result<(), Error> {
     }
     if client_parameter.get_value() {
         if arguments.get_other_arguments().len() != 0 {
-            let data = resp_encode(arguments.get_other_arguments());
+            let data = resp_encode_strings(arguments.get_other_arguments());
             let mut connection = TcpStream::connect(format!("{}:{}", host_parameter.get_value(), port))?;
-            connection.write_all(data.as_bytes())?;
+            connection.write_all(data.as_slice())?;
             let mut buffer = [0; 10000];
             let amt = connection.read(&mut buffer)?;
             match String::from_utf8(Vec::from(&buffer[0..amt])) {
@@ -88,7 +89,8 @@ fn main() -> Result<(), Error> {
                 s.lock().unwrap().send(Command::stop()).unwrap();
             }
         }).unwrap();
-        let pool = create_thread_pool(threads, rx, verbose);
+        let common_data = CommonData{ verbose, configuration: build_configuration(), map: build_map() };
+        let pool = create_thread_pool(threads, rx, common_data);
         server_start(sender, p, exit_flag)?;
         println!("Waiting for all threads to be finished...");
         for h in pool {
@@ -97,4 +99,14 @@ fn main() -> Result<(), Error> {
         println!("Exiting...");
     }
     Ok(())
+}
+
+fn build_map() -> RwLock<HashMap<Vec<u8>, Vec<u8>>> {
+    RwLock::new(HashMap::new())
+}
+
+fn build_configuration() -> HashMap<Vec<u8>, Vec<u8>> {
+    HashMap::from([
+        ("save".to_string().into_bytes(), "".to_string().into_bytes()),
+        ("appendonly".to_string().into_bytes(), "no".to_string().into_bytes())])
 }

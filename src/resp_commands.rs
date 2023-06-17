@@ -1,17 +1,40 @@
+use std::sync::Arc;
+use crate::resp_encoder::{resp_encode_array, resp_encode_binary_string, resp_encode_int};
 use crate::resp_parser::{check_name, INVALID_COMMAND_ERROR, RespCommand, RespToken};
 use crate::resp_parser::RespToken::{RespBinaryString, RespInteger};
+use crate::work_handler::CommonData;
+
+static NULL_STRING: &[u8] = "$-1\r\n".as_bytes();
+static PONG: &[u8] = "+PONG\r\n".as_bytes();
+pub static RN: &[u8] = "\r\n".as_bytes();
+static OK: &[u8] = "+OK\r\n".as_bytes();
+static NULL_ARRAY: &[u8] = "*-1\r\n".as_bytes();
 
 pub struct PingCommand;
 
 impl RespCommand for PingCommand {
-    fn run(&self) -> String {
-        "+PONG\r\n".to_string()
+    fn run(&self, _common_data: Arc<CommonData>) -> Vec<u8> {
+        Vec::from(PONG)
     }
 }
 
 impl PingCommand {
-    pub fn new(_v: Vec<RespToken>) -> Result<Box<dyn RespCommand>, &'static str> {
+    pub fn new() -> Result<Box<dyn RespCommand>, &'static str> {
         Ok(Box::new(PingCommand {}))
+    }
+}
+
+pub struct DbSizeCommand;
+
+impl RespCommand for DbSizeCommand {
+    fn run(&self, common_data: Arc<CommonData>) -> Vec<u8> {
+        resp_encode_int(common_data.map.read().unwrap().len() as isize)
+    }
+}
+
+impl DbSizeCommand {
+    pub fn new() -> Result<Box<dyn RespCommand>, &'static str> {
+        Ok(Box::new(DbSizeCommand {}))
     }
 }
 
@@ -20,8 +43,13 @@ pub struct GetCommand {
 }
 
 impl RespCommand for GetCommand {
-    fn run(&self) -> String {
-        "$-1\r\n".to_string()
+    fn run(&self, _common_data: Arc<CommonData>) -> Vec<u8> {
+        if let Some(v) = _common_data.map.read().unwrap().get(&self.key) {
+            let mut result = Vec::new();
+            resp_encode_binary_string(v, &mut result);
+            return result;
+        }
+        Vec::from(NULL_STRING)
     }
 }
 
@@ -43,8 +71,9 @@ pub struct SetCommand {
 }
 
 impl RespCommand for SetCommand {
-    fn run(&self) -> String {
-        "+OK\r\n".to_string()
+    fn run(&self, common_data: Arc<CommonData>) -> Vec<u8> {
+        common_data.map.write().unwrap().insert(self.key.clone(), self.value.clone());
+        Vec::from(OK)
     }
 }
 
@@ -76,8 +105,11 @@ pub struct ConfigurationCommand {
 }
 
 impl RespCommand for ConfigurationCommand {
-    fn run(&self) -> String {
-        "+PONG\r\n".to_string()
+    fn run(&self, common_data: Arc<CommonData>) -> Vec<u8> {
+        if let Some(v) = common_data.configuration.get(&self.key) {
+            return resp_encode_array(&vec![&self.key, v]);
+        }
+        Vec::from(NULL_ARRAY)
     }
 }
 
@@ -87,7 +119,7 @@ impl ConfigurationCommand {
             if let RespBinaryString(subcommand) = &v[1] {
                 check_name(subcommand, 0, "get")?;
                 if let RespBinaryString(key) = &v[2] {
-                    return Ok(Box::new(ConfigurationCommand{ key: key.clone() }));
+                    return Ok(Box::new(ConfigurationCommand { key: key.clone() }));
                 }
             }
         }

@@ -1,7 +1,8 @@
+use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::sync::mpsc::Receiver;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use std::thread::JoinHandle;
 use crate::resp_parser::resp_parse;
@@ -21,28 +22,31 @@ impl Command {
     }
 }
 
-struct HandlerData {
-    receiver: Mutex<Receiver<Command>>,
-    verbose: bool
+pub struct CommonData {
+    pub verbose: bool,
+    pub configuration: HashMap<Vec<u8>, Vec<u8>>,
+    pub map: RwLock<HashMap<Vec<u8>, Vec<u8>>>
 }
 
-pub fn create_thread_pool(threads: isize, rx: Receiver<Command>, verbose: bool) -> Vec<JoinHandle<()>> {
-    let arc = Arc::new(HandlerData{ receiver: Mutex::new(rx), verbose });
+pub fn create_thread_pool(threads: isize, rx: Receiver<Command>, common_data: CommonData) -> Vec<JoinHandle<()>> {
+    let arc = Arc::new(Mutex::new(rx));
+    let carc = Arc::new(common_data);
     let mut result = Vec::new();
     for _i in 0..threads {
         let a = arc.clone();
+        let c = carc.clone();
         result.push(thread::spawn(|| {
-            work_handler(a);
+            work_handler(a, c);
         }));
     }
     result
 }
 
-fn work_handler(data: Arc<HandlerData>) {
+fn work_handler(data: Arc<Mutex<Receiver<Command>>>, common_data: Arc<CommonData>) {
     loop {
-        let mut command = data.receiver.lock().unwrap().recv().unwrap();
+        let mut command = data.lock().unwrap().recv().unwrap();
         if command.stop {
-            if data.verbose {
+            if common_data.verbose {
                 println!("Stopping thread...");
             }
             return;
@@ -58,20 +62,23 @@ fn work_handler(data: Arc<HandlerData>) {
                     match resp_parse(&buffer, amt) {
                         Ok(c) => {
                             for command in c {
-                                if s.write_all(command.run().as_bytes()).is_err() {
+                                let result = command.run(common_data.clone());
+                                //if common_data.verbose {
+                                //    println!("{}", result);
+                                //}
+                                if s.write_all(result.as_slice()).is_err() {
                                     break;
                                 }
                             }
                         },
                         Err(e) => {
-                            if data.verbose {
+                            if common_data.verbose {
                                 let s = String::from_utf8(Vec::from(&buffer[0..amt])).unwrap();
                                 println!("{} {}", s, e);
                             }
                             let _ = s.write_all(e.as_bytes());
                         }
                     }
-                    //let _ = s.shutdown(Shutdown::Both);
                 },
                 Err(e) => {
                     println!("Stream read error {}", e);
