@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::env::args;
 use std::io::{Error, Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::channel;
 use std::thread::available_parallelism;
@@ -75,9 +75,8 @@ fn main() -> Result<(), Error> {
         }
     } else {
         let (tx, rx) = channel();
-        let sender = Arc::new(Mutex::new(tx));
         let exit_flag = Arc::new(AtomicBool::new(false));
-        let s = sender.clone();
+        let s = tx.clone();
         let f = exit_flag.clone();
         let p = port as u16;
         ctrlc::set_handler(move || {
@@ -86,12 +85,12 @@ fn main() -> Result<(), Error> {
             TcpStream::connect(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), p)).unwrap();
             //stopping working threads
             for _i in 0..threads {
-                s.lock().unwrap().send(Command::stop()).unwrap();
+                s.send(Command::stop()).unwrap();
             }
         }).unwrap();
         let common_data = build_common_data(verbose);
         let pool = create_thread_pool(threads, rx, common_data);
-        server_start(sender, p, exit_flag)?;
+        server_start(tx, p, exit_flag)?;
         println!("Waiting for all threads to be finished...");
         for h in pool {
             h.join().unwrap();
