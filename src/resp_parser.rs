@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use crate::resp_commands::{ConfigurationCommand, DbSizeCommand, GetCommand, PingCommand, SetCommand};
+use crate::resp_commands::{run_config_command, run_dbsize_command, run_get_command, run_ping_command, run_set_command};
 use crate::resp_parser::RespToken::{RespArray, RespBinaryString, RespInteger, RespNullArray, RespNullString, RespString};
 use crate::work_handler::CommonData;
 
@@ -10,7 +10,7 @@ pub trait RespCommand {
 #[derive(PartialEq, Debug)]
 pub enum RespToken {
     RespArray(Vec<RespToken>),
-    RespString(String),
+    RespString(Vec<u8>),
     RespBinaryString(Vec<u8>),
     RespInteger(isize),
     RespNullArray,
@@ -19,64 +19,105 @@ pub enum RespToken {
 
 pub static INVALID_COMMAND_ERROR: &str = "-invalid command\r\n";
 
-pub fn resp_parse(buffer: &[u8], amt: usize) -> Result<Vec<Box<dyn RespCommand>>, &'static str> {
-    let tokens = parse_tokens(buffer, amt)?;
+pub fn resp_parse(buffer: &[u8], amt: usize, common_data: Arc<CommonData>) -> Vec<u8> {
+    let tokens = match parse_tokens(buffer, amt) {
+        Ok(t) => t,
+        Err(e) => return Vec::from(e)
+    };
     let mut result = Vec::new();
     for token in tokens {
-        result.push(build_command(token)?);
+        run_command(token, &mut result, common_data.clone());
     }
-    Ok(result)
+    result
 }
 
-pub fn check_name(s: &Vec<u8>, idx: usize, expected: &str) -> Result<(), &'static str> {
+pub fn check_name(s: &Vec<u8>, idx: usize, expected: &str) -> bool {
     if s.len() == idx + expected.len() {
         let b = expected.as_bytes();
         for i in idx..s.len() {
             let v1 = s[i];
             let v2 = b[i - idx];
             if v1 != v2 && v1 + 0x20 != v2 {
-                return Err(INVALID_COMMAND_ERROR);
+                return false;
             }
         }
-        return Ok(());
+        return true;
     }
-    Err(INVALID_COMMAND_ERROR)
+    false
 }
 
-fn build_command(token: RespToken) -> Result<Box<dyn RespCommand>, &'static str> {
+fn run_command(token: RespToken, result: &mut Vec<u8>, common_data: Arc<CommonData>) {
     match token {
         RespArray(v) => {
             if v.len() > 0 {
-                return match &v[0] {
+                match &v[0] {
                     RespBinaryString(s) => {
                         if s.len() > 0 {
-                            return match s[0] as char {
-                                'c'|'C' => { check_name(s, 1, "onfig")?; ConfigurationCommand::new(v) },
-                                'd'|'D' => { check_name(s, 1, "bsize")?; DbSizeCommand::new() },
-                                'g'|'G' => { check_name(s, 1, "et")?; GetCommand::new(v) },
-                                's'|'S' => { check_name(s, 1, "et")?; SetCommand::new(v) },
-                                'p'|'P' => { check_name(s, 1, "ing")?; PingCommand::new() },
-                                _ => Err(INVALID_COMMAND_ERROR)
+                            match s[0] as char {
+                                'c'|'C' => {
+                                    if check_name(s, 1, "onfig") {
+                                        run_config_command(v, result, common_data);
+                                    } else {
+                                        result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
+                                    }
+                                },
+                                'd'|'D' => {
+                                    if check_name(s, 1, "bsize") {
+                                        run_dbsize_command(result, common_data);
+                                    } else {
+                                        result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
+                                    }
+                                },
+                                'g'|'G' => {
+                                    if check_name(s, 1, "et") {
+                                        run_get_command(v, result, common_data);
+                                    } else {
+                                        result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
+                                    }
+                                },
+                                's'|'S' => {
+                                    if check_name(s, 1, "et") {
+                                        run_set_command(v, result, common_data);
+                                    } else {
+                                        result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
+                                    }
+                                },
+                                'p'|'P' => {
+                                    if check_name(s, 1, "ing") {
+                                        run_ping_command(result);
+                                    } else {
+                                        result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
+                                    }
+                                },
+                                _ => result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes())
                             }
+                            return;
                         }
-                        Err(INVALID_COMMAND_ERROR)
+                        result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
                     }
-                    _ => Err(INVALID_COMMAND_ERROR)
+                    _ => result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes())
                 }
+                return;
             }
-            Err(INVALID_COMMAND_ERROR)
+            result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
         }
         RespString(s) => {
             if s.len() > 0 {
-                let vv = s.clone().into_bytes();
-                return match vv[0] as char {
-                    'p'|'P' => { check_name(&vv, 1, "ing")?; PingCommand::new() },
-                    _ => Err(INVALID_COMMAND_ERROR)
+                match s[0] as char {
+                    'p'|'P' => {
+                        if check_name(&s, 1, "ing") {
+                            run_ping_command(result);
+                        } else {
+                            result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
+                        }
+                    },
+                    _ => result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes())
                 }
+                return;
             }
-            Err(INVALID_COMMAND_ERROR)
+            result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes())
         }
-        _ => Err(INVALID_COMMAND_ERROR)
+        _ => result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes())
     }
 }
 
@@ -119,14 +160,11 @@ fn parse_token(buffer: &[u8], idx: usize, amt: usize) -> Result<(usize, RespToke
     }
 }
 
-fn parse_string(buffer: &[u8], idx: usize, amt: usize) -> Result<(usize, String), &'static str> {
+fn parse_string(buffer: &[u8], idx: usize, amt: usize) -> Result<(usize, Vec<u8>), &'static str> {
     let mut new_idx = idx;
     while new_idx < amt {
         if buffer[new_idx] == '\r' as u8 {
-            if let Ok(s) = String::from_utf8(Vec::from(&buffer[idx..new_idx])) {
-                return Ok((new_idx+2, s));
-            }
-            return Err(INVALID_COMMAND_ERROR);
+            return Ok((new_idx+2, Vec::from(&buffer[idx..new_idx])));
         }
         new_idx += 1;
     }
@@ -196,17 +234,20 @@ fn parse_number(buffer: &[u8], idx: usize, amt: usize) -> Result<(usize, isize),
 
 #[cfg(test)]
 mod tests {
-    use crate::resp_parser::parse_tokens;
+    use std::sync::Arc;
+    use crate::build_common_data;
+    use crate::resp_parser::{parse_tokens, resp_parse};
     use crate::resp_parser::RespToken::{RespArray, RespBinaryString, RespInteger, RespString};
+
+    const BUFFER: &[u8] = "PING\r\n*5\r\n$3\r\nset\r\n$1\r\na\r\n$1\r\nb\r\n$2\r\nex\r\n:10\r\n*3\r\n$6\r\nconfig\r\n$3\r\nget\r\n$4\r\nsave\r\n".as_bytes();
 
     #[test]
     fn test_parse_tokens() -> Result<(), &'static str> {
-        let buffer = "PING\r\n*5\r\n$3\r\nset\r\n$1\r\na\r\n$1\r\nb\r\n$2\r\nex\r\n:10\r\n*3\r\n$6\r\nconfig\r\n$3\r\nget\r\n$4\r\nsave\r\n".as_bytes();
-        let result = parse_tokens(buffer, buffer.len())?;
+        let result = parse_tokens(BUFFER, BUFFER.len())?;
         assert_eq!(result.len(), 3);
         match &result[0] {
             RespString(s) => {
-                assert_eq!(s, &"PING".to_string());
+                assert_eq!(s, &"PING".to_string().into_bytes());
             },
             _ => return Err("error")
         }
@@ -231,5 +272,12 @@ mod tests {
             },
             _ => Err("error")
         }
+    }
+
+    #[test]
+    fn test_parse() {
+        let common_data = Arc::new(build_common_data(false));
+        let result = resp_parse(BUFFER, BUFFER.len(), common_data);
+        assert_eq!(result.as_slice(), "+PONG\r\n+OK\r\n*2\r\n$4\r\nsave\r\n$0\r\n\r\n".as_bytes());
     }
 }

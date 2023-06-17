@@ -59,26 +59,7 @@ fn work_handler(data: Arc<Mutex<Receiver<Command>>>, common_data: Arc<CommonData
                     if amt == 0 {
                         break;
                     }
-                    match resp_parse(&buffer, amt) {
-                        Ok(c) => {
-                            for command in c {
-                                let result = command.run(common_data.clone());
-                                //if common_data.verbose {
-                                //    println!("{}", result);
-                                //}
-                                if s.write_all(result.as_slice()).is_err() {
-                                    break;
-                                }
-                            }
-                        },
-                        Err(e) => {
-                            if common_data.verbose {
-                                let s = String::from_utf8(Vec::from(&buffer[0..amt])).unwrap();
-                                println!("{} {}", s, e);
-                            }
-                            let _ = s.write_all(e.as_bytes());
-                        }
-                    }
+                    let _ = s.write_all(resp_parse(&buffer, amt, common_data.clone()).as_slice());
                 },
                 Err(e) => {
                     println!("Stream read error {}", e);

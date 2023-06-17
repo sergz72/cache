@@ -89,7 +89,7 @@ fn main() -> Result<(), Error> {
                 s.lock().unwrap().send(Command::stop()).unwrap();
             }
         }).unwrap();
-        let common_data = CommonData{ verbose, configuration: build_configuration(), map: build_map() };
+        let common_data = build_common_data(verbose);
         let pool = create_thread_pool(threads, rx, common_data);
         server_start(sender, p, exit_flag)?;
         println!("Waiting for all threads to be finished...");
@@ -99,6 +99,10 @@ fn main() -> Result<(), Error> {
         println!("Exiting...");
     }
     Ok(())
+}
+
+pub fn build_common_data(verbose: bool) -> CommonData {
+    CommonData{ verbose, configuration: build_configuration(), map: build_map() }
 }
 
 fn build_map() -> RwLock<HashMap<Vec<u8>, Vec<u8>>> {
