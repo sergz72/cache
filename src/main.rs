@@ -4,16 +4,15 @@ mod resp_parser;
 mod resp_commands;
 mod resp_encoder;
 
-use std::collections::HashMap;
 use std::env::args;
 use std::io::{Error, Read, Write};
-use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream};
-use std::sync::{Arc, RwLock};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::channel;
-use std::thread::available_parallelism;
+use std::net::{IpAddr, Ipv4Addr, Shutdown, SocketAddr, TcpStream};
+use std::sync::Arc;
+use std::sync::atomic::Ordering;
+use std::thread;
+use std::time::Duration;
 use arguments_parser::{Arguments, IntParameter, SizeParameter, BoolParameter, Switch, StringParameter};
-use crate::work_handler::{Command, CommonData, create_thread_pool};
+use crate::work_handler::build_common_data;
 use ctrlc;
 use crate::resp_encoder::resp_encode_strings;
 use crate::server::server_start;
@@ -22,14 +21,12 @@ fn main() -> Result<(), Error> {
     let host_parameter = StringParameter::new("127.0.0.1");
     let port_parameter = IntParameter::new(6379);
     let max_memory_parameter = SizeParameter::new(1024 * 1024 * 1024);//1G
-    let threads_parameter = IntParameter::new(available_parallelism().unwrap().get() as isize);//1G
     let verbose_parameter = BoolParameter::new();
     let client_parameter = BoolParameter::new();
     let switches = [
         Switch::new("host", Some('h'), None, &host_parameter),
         Switch::new("port", Some('p'), None, &port_parameter),
         Switch::new("maximum_memory", Some('m'), None, &max_memory_parameter),
-        Switch::new("threads", Some('t'), None, &threads_parameter),
         Switch::new("verbose", Some('v'), None, &verbose_parameter),
         Switch::new("client", Some('c'), None, &client_parameter),
     ];
@@ -49,14 +46,9 @@ fn main() -> Result<(), Error> {
         println!("Invalid maximum_memory value");
         return Ok(());
     }
-    let threads = threads_parameter.get_value();
-    if threads <= 0 {
-        println!("Invalid threads value");
-        return Ok(());
-    }
     let verbose = verbose_parameter.get_value();
     if verbose {
-        println!("Port = {}\nMaximum memory = {}\nThreads = {}", port, max_memory, threads);
+        println!("Port = {}\nMaximum memory = {}", port, max_memory);
     }
     if client_parameter.get_value() {
         if arguments.get_other_arguments().len() != 0 {
@@ -74,42 +66,29 @@ fn main() -> Result<(), Error> {
             return Ok(());
         }
     } else {
-        let (tx, rx) = channel();
-        let exit_flag = Arc::new(AtomicBool::new(false));
-        let s = tx.clone();
-        let f = exit_flag.clone();
+        let common_data = Arc::new(build_common_data(verbose, max_memory as usize));
         let p = port as u16;
+        let c = common_data.clone();
         ctrlc::set_handler(move || {
-            f.store(true, Ordering::Relaxed);
+            c.exit_flag.store(true, Ordering::Relaxed);
             //stopping the server
             TcpStream::connect(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), p)).unwrap();
-            //stopping working threads
-            for _i in 0..threads {
-                s.send(Command::stop()).unwrap();
-            }
         }).unwrap();
-        let common_data = build_common_data(verbose);
-        let pool = create_thread_pool(threads, rx, common_data);
-        server_start(tx, p, exit_flag)?;
+        server_start(p, common_data.clone())?;
         println!("Waiting for all threads to be finished...");
-        for h in pool {
-            h.join().unwrap();
+        let v: Vec<usize> = common_data.threads.read().unwrap().iter()
+            .map(|(k, _v)|*k)
+            .collect();
+        for idx in v  {
+            if let Some(t) = common_data.threads.read().unwrap().get(&idx) {
+                let _ = t.lock().unwrap().shutdown(Shutdown::Both);
+            }
+        }
+        let d = Duration::from_millis(500);
+        while common_data.threads.read().unwrap().len() > 0 {
+            thread::sleep(d);
         }
         println!("Exiting...");
     }
     Ok(())
-}
-
-pub fn build_common_data(verbose: bool) -> CommonData {
-    CommonData{ verbose, configuration: build_configuration(), map: build_map() }
-}
-
-fn build_map() -> RwLock<HashMap<Vec<u8>, Vec<u8>>> {
-    RwLock::new(HashMap::new())
-}
-
-fn build_configuration() -> HashMap<Vec<u8>, Vec<u8>> {
-    HashMap::from([
-        ("save".to_string().into_bytes(), "".to_string().into_bytes()),
-        ("appendonly".to_string().into_bytes(), "no".to_string().into_bytes())])
 }
