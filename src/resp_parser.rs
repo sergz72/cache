@@ -1,7 +1,7 @@
 use std::sync::Arc;
-use crate::resp_commands::{run_config_command, run_dbsize_command, run_get_command, run_ping_command, run_set_command};
+use crate::resp_commands::{run_config_command, run_dbsize_command, run_get_command, run_ping_command, run_select_command, run_set_command};
 use crate::resp_parser::RespToken::{RespArray, RespBinaryString, RespInteger, RespNullArray, RespNullString, RespString};
-use crate::work_handler::CommonData;
+use crate::common_data::CommonData;
 
 pub trait RespCommand {
     fn run(&self, common_data: Arc<CommonData>) -> Vec<u8>;
@@ -76,15 +76,23 @@ fn run_command(token: RespToken, result: &mut Vec<u8>, common_data: Arc<CommonDa
                                     }
                                 },
                                 's'|'S' => {
-                                    if check_name(s, 1, "et") {
-                                        run_set_command(v, result, common_data);
-                                    } else {
-                                        result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
+                                    match s.len() {
+                                        3 => if check_name(s, 1, "et") {
+                                            run_set_command(v, result, common_data);
+                                        } else {
+                                            result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
+                                        },
+                                        6 => if check_name(s, 1, "elect") {
+                                            run_select_command(result);
+                                        } else {
+                                            result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
+                                        },
+                                        _ => result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes())
                                     }
                                 },
                                 'p'|'P' => {
                                     if check_name(s, 1, "ing") {
-                                        run_ping_command(result);
+                                        run_ping_command(v, result);
                                     } else {
                                         result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
                                     }
@@ -106,7 +114,7 @@ fn run_command(token: RespToken, result: &mut Vec<u8>, common_data: Arc<CommonDa
                 match s[0] as char {
                     'p'|'P' => {
                         if check_name(&s, 1, "ing") {
-                            run_ping_command(result);
+                            run_ping_command(Vec::new(), result);
                         } else {
                             result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
                         }

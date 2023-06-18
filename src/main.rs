@@ -1,4 +1,4 @@
-mod work_handler;
+mod common_data;
 mod server;
 mod resp_parser;
 mod resp_commands;
@@ -12,7 +12,7 @@ use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;
 use arguments_parser::{Arguments, IntParameter, SizeParameter, BoolParameter, Switch, StringParameter};
-use crate::work_handler::build_common_data;
+use crate::common_data::build_common_data;
 use ctrlc;
 use crate::resp_encoder::resp_encode_strings;
 use crate::server::server_start;

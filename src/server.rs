@@ -1,9 +1,39 @@
-use std::io::Error;
-use std::net::{SocketAddr, TcpListener};
+use std::io::{Error, Read, Write};
+use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::ops::DerefMut;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::Ordering;
 use std::thread;
-use crate::work_handler::{CommonData, work_handler};
+use crate::common_data::CommonData;
+use crate::resp_parser::resp_parse;
+
+pub fn work_handler<'a>(idx: usize, stream: Arc<Mutex<TcpStream>>, common_data: Arc<CommonData>) {
+    let mut buffer = [0; 1000000];
+    loop {
+        let mut guard = stream.lock().unwrap();
+        let s = guard.deref_mut();
+        let result = s.read(&mut buffer);
+        match result {
+            Ok(amt) => {
+                if amt == 0 {
+                    break;
+                }
+                let _ = s.write_all(resp_parse(&buffer, amt, common_data.clone()).as_slice());
+            },
+            Err(e) => {
+                if common_data.exit_flag.load(Ordering::Relaxed) {
+                    if common_data.verbose {
+                        println!("Stopping thread...");
+                    }
+                } else {
+                    println!("Stream read error {}", e);
+                }
+                break;
+            }
+        }
+    }
+    common_data.threads.write().unwrap().remove(&idx);
+}
 
 pub fn server_start(port: u16, common_data: Arc<CommonData>) -> Result<(), Error> {
     let listener = TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], port)))?;

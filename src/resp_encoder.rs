@@ -1,4 +1,4 @@
-use crate::resp_commands::RN;
+static RN: &[u8] = "\r\n".as_bytes();
 
 /*pub fn resp_encode_array(commands: &Vec<&Vec<u8>>) -> Vec<u8> {
     let mut result = Vec::new();
