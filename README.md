@@ -2,18 +2,18 @@
 
 Communication protocol: Redis RESP protocol
 
-Usage: cache
-  -p port (default is 6379)
-  -c (client mode)
-  -v (verbose)
-  -k number of keys for benchmark (default us 50000)
-  -h host for client to connect (default is 127.0.0.1)
-  -b (benchmark mode)
-  -r number of requests per thread for benchmark (default is 50000)
-  -m maximum memory for server (default is 1GB, check is not implemented yet)
-  -t request types for benchmark (possible values - get,set, default: get,set)
-  --nx key expiration in ms for benchmark (default is 100 ms)
-  --th number of threads for benchmark (default is 10)
+Usage: cache<br>
+  -p port (default is 6379)<br>
+  -c (client mode)<br>
+  -v (verbose)<br>
+  -k number of keys for benchmark (default us 50000)<br>
+  -h host for client to connect (default is 127.0.0.1)<br>
+  -b (benchmark mode)<br>
+  -r number of requests per thread for benchmark (default is 50000)<br>
+  -m maximum memory for server (default is 1GB, check is not implemented yet)<br>
+  -t request types for benchmark (possible values - get,set, default: get,set)<br>
+  --nx key expiration in ms for benchmark (default is 100 ms)<br>
+  --th number of threads for benchmark (default is 10)<br>
 
 Only a few Redis commands are implemented:
 
