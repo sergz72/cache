@@ -4,6 +4,8 @@ mod resp_parser;
 mod resp_commands;
 mod resp_encoder;
 mod benchmark;
+mod common_maps;
+mod hash_builders;
 
 use std::env::args;
 use std::io::{Error, Read, Write};
@@ -17,6 +19,7 @@ use crate::common_data::build_common_data;
 use ctrlc;
 use crate::benchmark::{benchmark_mode, BenchmarkCommand};
 use crate::benchmark::BenchmarkCommand::{Get, Set};
+use crate::hash_builders::{create_hash_builder, HashBuilder};
 use crate::resp_encoder::resp_encode_strings;
 use crate::server::server_start;
 
@@ -32,6 +35,8 @@ fn main() -> Result<(), Error> {
     let threads_parameter = IntParameter::new(10);
     let types_parameter = StringParameter::new("get,set");
     let expiration_parameter = IntParameter::new(100);
+    let vector_size_parameter = IntParameter::new(256);
+    let hash_type_parameter = StringParameter::new("sum");
     let switches = [
         Switch::new("host for client to connect", Some('h'), None, &host_parameter),
         Switch::new("port", Some('p'), None, &port_parameter),
@@ -44,6 +49,8 @@ fn main() -> Result<(), Error> {
         Switch::new("number of threads for benchmark", None, Some("th"), &threads_parameter),
         Switch::new("request types for benchmark", Some('t'), None, &types_parameter),
         Switch::new("key expiration in ms for benchmark", None, Some("nx"), &expiration_parameter),
+        Switch::new("numer of key maps", None, Some("km"), &vector_size_parameter),
+        Switch::new("hash builder type", None, Some("hb"), &hash_type_parameter),
     ];
     let mut arguments = Arguments::new("cache", &switches);
     if let Err(e) = arguments.build(args().skip(1).collect()) {
@@ -112,10 +119,18 @@ fn main() -> Result<(), Error> {
             println!("Invalid maximum_memory value");
             return Ok(());
         }
-        if verbose {
-            println!("Port = {}\nMaximum memory = {}", port, max_memory);
+        let vector_size = vector_size_parameter.get_value();
+        if vector_size <= 0 {
+            println!("Invalid vector size value");
+            return Ok(());
         }
-        server_mode(verbose, max_memory as usize, p)
+        let vs = vector_size as usize;
+        let hash_builder = create_hash_builder(hash_type_parameter.get_value(), vs)?;
+        if verbose {
+            println!("Port = {}\nMaximum memory = {}\nVector size = {}\nHash builder = {}", port,
+                     max_memory, vector_size, hash_builder.get_name());
+        }
+        server_mode(verbose, max_memory as usize, p, vs, hash_builder)
     }
 }
 
@@ -136,8 +151,9 @@ fn client_mode(other_arguments: &Vec<String>, port: u16, host: String) -> Result
     Ok(())
 }
 
-fn server_mode(verbose: bool, max_memory: usize, port: u16) -> Result<(), Error> {
-    let common_data = Arc::new(build_common_data(verbose, max_memory));
+fn server_mode(verbose: bool, max_memory: usize, port: u16, vector_size: usize,
+               hash_builder: Box<dyn HashBuilder + Sync + Send>) -> Result<(), Error> {
+    let common_data = Arc::new(build_common_data(verbose, max_memory, vector_size, hash_builder));
     let c = common_data.clone();
     ctrlc::set_handler(move || {
         c.exit_flag.store(true, Ordering::Relaxed);
