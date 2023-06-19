@@ -35,7 +35,7 @@
 2. Client mode (with -c switch)
 3. Benchmark mode (with -b switch)
 
-**In benchmark mode the following server commands can be used:**
+**In benchmark mode the following server commands can be used:** (key is a random number between 0 and number of keys converted to string)
 1. get key
 2. set key value nx expiration_in_ms (value always = key)
 
