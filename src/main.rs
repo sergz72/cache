@@ -40,7 +40,7 @@ fn main() -> Result<(), Error> {
         Switch::new("client mode", Some('c'), None, &client_parameter),
         Switch::new("benchmark mode", Some('b'), None, &benchmark_parameter),
         Switch::new("number of keys for benchmark", Some('k'), None, &keys_parameter),
-        Switch::new("number of request per thread for benchmark", Some('r'), None, &requests_parameter),
+        Switch::new("number of requests per thread for benchmark", Some('r'), None, &requests_parameter),
         Switch::new("number of threads for benchmark", None, Some("th"), &threads_parameter),
         Switch::new("request types for benchmark", Some('t'), None, &types_parameter),
         Switch::new("key expiration in ms for benchmark", None, Some("nx"), &expiration_parameter),
