@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 arguments_parser = { git = "https://github.com/sergz72/arguments_parser.git"}
 ctrlc = { version = "3.0", features = ["termination"] }
+rand = "0.8.5"

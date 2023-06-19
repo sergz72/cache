@@ -3,6 +3,7 @@ mod server;
 mod resp_parser;
 mod resp_commands;
 mod resp_encoder;
+mod benchmark;
 
 use std::env::args;
 use std::io::{Error, Read, Write};
@@ -14,6 +15,8 @@ use std::time::Duration;
 use arguments_parser::{Arguments, IntParameter, SizeParameter, BoolParameter, Switch, StringParameter};
 use crate::common_data::build_common_data;
 use ctrlc;
+use crate::benchmark::{benchmark_mode, BenchmarkCommand};
+use crate::benchmark::BenchmarkCommand::{Get, Set};
 use crate::resp_encoder::resp_encode_strings;
 use crate::server::server_start;
 
@@ -23,12 +26,24 @@ fn main() -> Result<(), Error> {
     let max_memory_parameter = SizeParameter::new(1024 * 1024 * 1024);//1G
     let verbose_parameter = BoolParameter::new();
     let client_parameter = BoolParameter::new();
+    let benchmark_parameter = BoolParameter::new();
+    let keys_parameter = IntParameter::new(50000);
+    let requests_parameter = IntParameter::new(50000);
+    let threads_parameter = IntParameter::new(10);
+    let types_parameter = StringParameter::new("get,set");
+    let expiration_parameter = IntParameter::new(100);
     let switches = [
-        Switch::new("host", Some('h'), None, &host_parameter),
+        Switch::new("host for client to connect", Some('h'), None, &host_parameter),
         Switch::new("port", Some('p'), None, &port_parameter),
-        Switch::new("maximum_memory", Some('m'), None, &max_memory_parameter),
+        Switch::new("maximum memory for server", Some('m'), None, &max_memory_parameter),
         Switch::new("verbose", Some('v'), None, &verbose_parameter),
-        Switch::new("client", Some('c'), None, &client_parameter),
+        Switch::new("client mode", Some('c'), None, &client_parameter),
+        Switch::new("benchmark mode", Some('b'), None, &benchmark_parameter),
+        Switch::new("number of keys for benchmark", Some('k'), None, &keys_parameter),
+        Switch::new("number of request per thread for benchmark", Some('r'), None, &requests_parameter),
+        Switch::new("number of threads for benchmark", None, Some("th"), &threads_parameter),
+        Switch::new("request types for benchmark", Some('t'), None, &types_parameter),
+        Switch::new("key expiration in ms for benchmark", None, Some("nx"), &expiration_parameter),
     ];
     let mut arguments = Arguments::new("cache", &switches);
     if let Err(e) = arguments.build(args().skip(1).collect()) {
@@ -41,54 +56,108 @@ fn main() -> Result<(), Error> {
         println!("Invalid port value");
         return Ok(());
     }
-    let max_memory = max_memory_parameter.get_value();
-    if max_memory <= 0 {
-        println!("Invalid maximum_memory value");
-        return Ok(());
-    }
+    let p = port as u16;
     let verbose = verbose_parameter.get_value();
-    if verbose {
-        println!("Port = {}\nMaximum memory = {}", port, max_memory);
-    }
-    if client_parameter.get_value() {
-        if arguments.get_other_arguments().len() != 0 {
-            let data = resp_encode_strings(arguments.get_other_arguments());
-            let mut connection = TcpStream::connect(format!("{}:{}", host_parameter.get_value(), port))?;
-            connection.write_all(data.as_slice())?;
-            let mut buffer = [0; 10000];
-            let amt = connection.read(&mut buffer)?;
-            match String::from_utf8(Vec::from(&buffer[0..amt])) {
-                Ok(s) => print!("{}", s),
-                Err(e) => println!("{}", e)
-            };
-        } else {
-            println!("No commands specified");
+    if benchmark_parameter.get_value() {
+        let keys = keys_parameter.get_value();
+        if keys <= 0 {
+            println!("Invalid keys value");
             return Ok(());
         }
+        let requests = requests_parameter.get_value();
+        if requests <= 0 {
+            println!("Invalid requests value");
+            return Ok(());
+        }
+        let threads = threads_parameter.get_value();
+        if threads <= 0 {
+            println!("Invalid threads value");
+            return Ok(());
+        }
+        let expiration = expiration_parameter.get_value();
+        if expiration <= 0 {
+            println!("Invalid expiration value");
+            return Ok(());
+        }
+        let types_string = types_parameter.get_value();
+        let types: Vec<Option<BenchmarkCommand>> = types_string.split(',')
+            .map(|s|{
+                match s {
+                    "get" => Some(Get),
+                    "set" => Some(Set),
+                    _ => None
+                }
+            }).collect();
+        if types.len() != 2 || types[0].is_none() || types[1].is_none() {
+            println!("Invalid request types value");
+            return Ok(());
+        }
+        let host = host_parameter.get_value();
+        if verbose {
+            println!("Port = {}\nHost = {}\nKeys= {}\nRequests per thread = {}\nThreads = {}\nExpiration = {} ms\nRequest types = {}",
+                     port, host, keys, requests, threads, expiration, types_string);
+        }
+        benchmark_mode(p, host, keys as usize, requests as usize,
+                       threads as usize, expiration as usize,
+                       [types[0].as_ref().unwrap().clone(), types[1].as_ref().unwrap().clone()])
+    } else if client_parameter.get_value() {
+        let host= host_parameter.get_value();
+        if verbose {
+            println!("Port = {}\nHost = {}", port, host);
+        }
+        client_mode(arguments.get_other_arguments(), p, host)
     } else {
-        let common_data = Arc::new(build_common_data(verbose, max_memory as usize));
-        let p = port as u16;
-        let c = common_data.clone();
-        ctrlc::set_handler(move || {
-            c.exit_flag.store(true, Ordering::Relaxed);
-            //stopping the server
-            TcpStream::connect(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), p)).unwrap();
-        }).unwrap();
-        server_start(p, common_data.clone())?;
-        println!("Waiting for all threads to be finished...");
-        let v: Vec<usize> = common_data.threads.read().unwrap().iter()
-            .map(|(k, _v)|*k)
-            .collect();
-        for idx in v  {
-            if let Some(t) = common_data.threads.read().unwrap().get(&idx) {
-                let _ = t.lock().unwrap().shutdown(Shutdown::Both);
-            }
+        let max_memory = max_memory_parameter.get_value();
+        if max_memory <= 0 {
+            println!("Invalid maximum_memory value");
+            return Ok(());
         }
-        let d = Duration::from_millis(500);
-        while common_data.threads.read().unwrap().len() > 0 {
-            thread::sleep(d);
+        if verbose {
+            println!("Port = {}\nMaximum memory = {}", port, max_memory);
         }
-        println!("Exiting...");
+        server_mode(verbose, max_memory as usize, p)
     }
+}
+
+fn client_mode(other_arguments: &Vec<String>, port: u16, host: String) -> Result<(), Error> {
+    if other_arguments.len() != 0 {
+        let data = resp_encode_strings(other_arguments);
+        let mut connection = TcpStream::connect(format!("{}:{}", host, port))?;
+        connection.write_all(data.as_slice())?;
+        let mut buffer = [0; 10000];
+        let amt = connection.read(&mut buffer)?;
+        match String::from_utf8(Vec::from(&buffer[0..amt])) {
+            Ok(s) => print!("{}", s),
+            Err(e) => println!("{}", e)
+        };
+    } else {
+        println!("No commands specified");
+    }
+    Ok(())
+}
+
+fn server_mode(verbose: bool, max_memory: usize, port: u16) -> Result<(), Error> {
+    let common_data = Arc::new(build_common_data(verbose, max_memory));
+    let c = common_data.clone();
+    ctrlc::set_handler(move || {
+        c.exit_flag.store(true, Ordering::Relaxed);
+        //stopping the server
+        TcpStream::connect(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), port)).unwrap();
+    }).unwrap();
+    server_start(port, common_data.clone())?;
+    println!("Waiting for all threads to be finished...");
+    let v: Vec<usize> = common_data.threads.read().unwrap().iter()
+        .map(|(k, _v)|*k)
+        .collect();
+    for idx in v  {
+        if let Some(t) = common_data.threads.read().unwrap().get(&idx) {
+            let _ = t.lock().unwrap().shutdown(Shutdown::Both);
+        }
+    }
+    let d = Duration::from_millis(500);
+    while common_data.threads.read().unwrap().len() > 0 {
+        thread::sleep(d);
+    }
+    println!("Exiting...");
     Ok(())
 }

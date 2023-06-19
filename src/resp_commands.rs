@@ -23,8 +23,30 @@ pub fn run_select_command(result: &mut Vec<u8>) {
     result.extend_from_slice(OK);
 }
 
+pub fn run_flush_command(result: &mut Vec<u8>, common_data: Arc<CommonData>) {
+    common_data.flush();
+    result.extend_from_slice(OK);
+}
+
 pub fn run_dbsize_command(result: &mut Vec<u8>, common_data: Arc<CommonData>) {
     resp_encode_int(common_data.size() as isize, result)
+}
+
+pub fn run_del_command(v: Vec<RespToken>, result: &mut Vec<u8>, common_data: Arc<CommonData>) {
+    if v.len() >= 2 {
+        let mut keys = Vec::new();
+        for i in 1..v.len() {
+            if let RespBinaryString(v) = &v[i] {
+                keys.push(v);
+            } else {
+                result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
+                return;
+            }
+        }
+        let removed = common_data.removekeys(keys);
+        resp_encode_int(removed, result);
+    }
+    result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
 }
 
 pub fn run_get_command(v: Vec<RespToken>, result: &mut Vec<u8>, common_data: Arc<CommonData>) {
@@ -43,7 +65,7 @@ fn set_with_result(k: &Vec<u8>, vv: &Vec<u8>, e: isize, result: &mut Vec<u8>, co
     if e <= 0 {
         result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
     } else {
-        common_data.add(k, vv, Some(e as u64));
+        common_data.set(k, vv, Some(e as u64));
         result.extend_from_slice(OK);
     }
 }
@@ -67,26 +89,53 @@ pub fn run_set_command(v: Vec<RespToken>, result: &mut Vec<u8>, common_data: Arc
         if let RespBinaryString(k) = &v[1] {
             if let RespBinaryString(vv) = &v[2] {
                 if l == 3 {
-                    common_data.add(k, vv, None);
+                    common_data.set(k, vv, None);
                     result.extend_from_slice(OK);
                     return;
                 } else if l == 5 {
                     if let RespBinaryString(option) = &v[3] {
-                        if check_name(option, 0, "ex") {
-                            match &v[4] {
-                                RespInteger(ex) => {
-                                    set_with_result(k, vv, *ex, result, common_data);
-                                }
-                                RespBinaryString(v) => {
-                                    if let Some(ex) = parse_number_from_vec(v) {
-                                        set_with_result(k, vv, ex, result, common_data);
-                                    } else {
+                        if option.len() == 2 {
+                            let c2 = option[1];
+                            if c2 == 'x' as u8 || c2 == 'X' as u8 {
+                                match option[0] as char {
+                                    'e' | 'E' => {
+                                        match &v[4] {
+                                            RespInteger(ex) => {
+                                                set_with_result(k, vv, *ex * 1000, result, common_data);
+                                            }
+                                            RespBinaryString(v) => {
+                                                if let Some(ex) = parse_number_from_vec(v) {
+                                                    set_with_result(k, vv, ex * 1000, result, common_data);
+                                                } else {
+                                                    result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
+                                                }
+                                            }
+                                            _ => result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes())
+                                        }
+                                        return;
+                                    }
+                                    'n'|'N' => {
+                                        match &v[4] {
+                                            RespInteger(ex) => {
+                                                set_with_result(k, vv, *ex, result, common_data);
+                                            }
+                                            RespBinaryString(v) => {
+                                                if let Some(ex) = parse_number_from_vec(v) {
+                                                    set_with_result(k, vv, ex, result, common_data);
+                                                } else {
+                                                    result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
+                                                }
+                                            }
+                                            _ => result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes())
+                                        }
+                                        return;
+                                    }
+                                    _ => {
                                         result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
+                                        return;
                                     }
                                 }
-                                _ => result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes())
                             }
-                            return;
                         }
                     }
                 }

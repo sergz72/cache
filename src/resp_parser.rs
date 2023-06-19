@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use crate::resp_commands::{run_config_command, run_dbsize_command, run_get_command, run_ping_command, run_select_command, run_set_command};
+use crate::resp_commands::{run_config_command, run_dbsize_command, run_del_command, run_flush_command, run_get_command, run_ping_command, run_select_command, run_set_command};
 use crate::resp_parser::RespToken::{RespArray, RespBinaryString, RespInteger, RespNullArray, RespNullString, RespString};
 use crate::common_data::CommonData;
 
@@ -62,10 +62,37 @@ fn run_command(token: RespToken, result: &mut Vec<u8>, common_data: Arc<CommonDa
                                     }
                                 },
                                 'd'|'D' => {
-                                    if check_name(s, 1, "bsize") {
-                                        run_dbsize_command(result, common_data);
-                                    } else {
-                                        result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
+                                    match s.len() {
+                                        3 => if check_name(s, 1, "el") {
+                                            run_del_command(v, result, common_data);
+                                        } else {
+                                            result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
+                                        },
+                                        6 => if check_name(s, 1, "bsize") {
+                                            run_dbsize_command(result, common_data);
+                                        } else {
+                                            result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
+                                        },
+                                        _ => result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes())
+                                    }
+                                },
+                                'f'|'F' => {
+                                    match s.len() {
+                                        7 => {
+                                            if check_name(s, 1, "lushdb") {
+                                                run_flush_command(result, common_data);
+                                            } else {
+                                                result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
+                                            }
+                                        }
+                                        8 => {
+                                            if check_name(s, 1, "lushall") {
+                                                run_flush_command(result, common_data);
+                                            } else {
+                                                result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
+                                            }
+                                        }
+                                        _ => result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes())
                                     }
                                 },
                                 'g'|'G' => {
@@ -284,7 +311,7 @@ mod tests {
 
     #[test]
     fn test_parse() {
-        let common_data = Arc::new(build_common_data(false));
+        let common_data = Arc::new(build_common_data(false, 1000));
         let result = resp_parse(BUFFER, BUFFER.len(), common_data);
         assert_eq!(result.as_slice(), "+PONG\r\n+OK\r\n*2\r\n$4\r\nsave\r\n$0\r\n\r\n".as_bytes());
     }
