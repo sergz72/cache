@@ -1,4 +1,4 @@
-# A toy memory-only key-value store implementation
+# A simple memory-only key-value store implementation
 
 **Communication protocol: Redis RESP protocol**
 
@@ -14,6 +14,8 @@
   -t request types for benchmark (possible values - get,set, default: get,set)<br>
   --nx key expiration in ms for benchmark (default is 100 ms)<br>
   --th number of threads for benchmark (default is 10)<br>
+  --km numer of key maps (default 256)<br>
+  --hb hash builder type (default sum)<br>
 
 **Only a few Redis commands are implemented:**
 
@@ -71,4 +73,4 @@ Requests per thread = 50000<br>
 Threads = 10<br>
 Expiration = 100 ms<br>
 Request types = get,set<br>
-Elapsed: 4302 ms, 116225 requests per second
+Elapsed: 3312 ms, 150966 requests per second
