@@ -123,12 +123,35 @@ impl CommonMaps {
         };
     }
 
-    fn cleanup(&mut self) {
-        //todo
+    fn remove_expired(&mut self, start_time: SystemTime) {
+        let now = SystemTime::now().duration_since(start_time).unwrap().as_millis() as u64;
+        let mut to_remove = Vec::new();
+        for (k, v) in &self.map_by_expiration {
+            let kk = *k;
+            if kk < now {
+                for k in v {
+                    to_remove.push(k.clone());
+                }
+            }
+        }
+        for k in to_remove {
+            self.removekey(&k);
+        }
+    }
+
+    fn cleanup(&mut self, start_time: SystemTime) {
+        if self.current_memory >= self.max_memory {
+            self.remove_expired(start_time);
+            while self.current_memory >= self.max_memory {
+                //remove by lru
+                let (_k, v) = self.map_by_time.first_key_value().unwrap();
+                v.clone().iter().for_each(|k| { let _ = self.removekey(k); });
+            }
+        }
     }
 
     pub fn set(&mut self, key: &Vec<u8>, value: &Vec<u8>, expiry: Option<u64>, start_time: SystemTime) {
-        self.cleanup();
+        self.cleanup(start_time);
         let created_at = SystemTime::now().duration_since(start_time).unwrap().as_millis() as u64;
         let v = Value::new(value.clone(), created_at, expiry);
         let created_at = v.created_at;
@@ -177,7 +200,7 @@ mod tests {
     fn test_set_delete() {
         let mut rng = rand::thread_rng();
         let mut keys = Vec::new();
-        let mut maps = build_map(1000000);
+        let mut maps = build_map(100000000);
         let start_time = SystemTime::now();
         for _i in 0..1000 {
             let key_length = (rng.gen::<usize>() % 100) + 10;
@@ -202,6 +225,48 @@ mod tests {
         assert_eq!(maps.map_by_time.len(), 0);
         assert_eq!(maps.map_by_expiration.len(), 0);
         assert_eq!(maps.current_memory, 0);
+    }
+
+    #[test]
+    fn test_cleanup() {
+        let mut rng = rand::thread_rng();
+        let mut maps = build_map(100000);
+        let start_time = SystemTime::now();
+        for _i in 0..1000 {
+            let key_length = (rng.gen::<usize>() % 100) + 10;
+            let value_length = (rng.gen::<usize>() % 200) + 10;
+            let key = Alphanumeric.sample_string(&mut rng, key_length).into_bytes();
+            let value = Alphanumeric.sample_string(&mut rng, value_length).into_bytes();
+            maps.set(&key, &value, None, start_time);
+        }
+
+        assert!(maps.current_memory - 1000 < maps.max_memory);
+    }
+
+    #[test]
+    fn test_cleanup2() {
+        let mut rng = rand::thread_rng();
+        let mut maps = build_map(100000);
+        let start_time = SystemTime::now();
+        for _i in 0..1000 {
+            let key_length = (rng.gen::<usize>() % 100) + 10;
+            let value_length = (rng.gen::<usize>() % 200) + 10;
+            let key = Alphanumeric.sample_string(&mut rng, key_length).into_bytes();
+            let value = Alphanumeric.sample_string(&mut rng, value_length).into_bytes();
+            maps.set(&key, &value, Some(100), start_time);
+        }
+
+        thread::sleep(Duration::from_millis(200));
+
+        let key_length = (rng.gen::<usize>() % 100) + 10;
+        let key = Alphanumeric.sample_string(&mut rng, key_length).into_bytes();
+        let value = Alphanumeric.sample_string(&mut rng, 20000).into_bytes();
+        maps.set(&key, &value, None, start_time);
+        let value_length = (rng.gen::<usize>() % 200) + 10;
+        let new_value = Alphanumeric.sample_string(&mut rng, value_length).into_bytes();
+        maps.set(&key, &new_value, None, start_time);
+
+        assert_eq!(maps.size(), 1);
     }
 
     #[test]
