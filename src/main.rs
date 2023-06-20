@@ -18,7 +18,7 @@ use arguments_parser::{Arguments, IntParameter, SizeParameter, BoolParameter, Sw
 use crate::common_data::build_common_data;
 use ctrlc;
 use crate::benchmark::{benchmark_mode, BenchmarkCommand};
-use crate::benchmark::BenchmarkCommand::{Get, Set};
+use crate::benchmark::BenchmarkCommand::{Get, Set, SetNX};
 use crate::hash_builders::{create_hash_builder, HashBuilder};
 use crate::resp_encoder::resp_encode_strings;
 use crate::server::server_start;
@@ -33,7 +33,7 @@ fn main() -> Result<(), Error> {
     let keys_parameter = IntParameter::new(50000);
     let requests_parameter = IntParameter::new(50000);
     let threads_parameter = IntParameter::new(10);
-    let types_parameter = StringParameter::new("get,set");
+    let types_parameter = StringParameter::new("get,set,get,setnx");
     let expiration_parameter = IntParameter::new(100);
     let vector_size_parameter = IntParameter::new(256);
     let hash_type_parameter = StringParameter::new("sum");
@@ -92,10 +92,11 @@ fn main() -> Result<(), Error> {
                 match s {
                     "get" => Some(Get),
                     "set" => Some(Set),
+                    "setnx" => Some(SetNX),
                     _ => None
                 }
             }).collect();
-        if types.len() != 2 || types[0].is_none() || types[1].is_none() {
+        if types.len() != 4 || types[0].is_none() || types[1].is_none() || types[2].is_none() || types[3].is_none() {
             println!("Invalid request types value");
             return Ok(());
         }
@@ -106,7 +107,8 @@ fn main() -> Result<(), Error> {
         }
         benchmark_mode(p, host, keys as usize, requests as usize,
                        threads as usize, expiration as usize,
-                       [types[0].as_ref().unwrap().clone(), types[1].as_ref().unwrap().clone()])
+                       [types[0].as_ref().unwrap().clone(), types[1].as_ref().unwrap().clone(),
+                           types[2].as_ref().unwrap().clone(), types[3].as_ref().unwrap().clone()])
     } else if client_parameter.get_value() {
         let host= host_parameter.get_value();
         if verbose {
