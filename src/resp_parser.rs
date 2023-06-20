@@ -271,6 +271,7 @@ fn parse_number(buffer: &[u8], idx: usize, amt: usize) -> Result<(usize, isize),
 mod tests {
     use std::sync::Arc;
     use crate::build_common_data;
+    use crate::hash_builders::create_hash_builder;
     use crate::resp_parser::{parse_tokens, resp_parse};
     use crate::resp_parser::RespToken::{RespArray, RespBinaryString, RespInteger, RespString};
 
@@ -311,7 +312,9 @@ mod tests {
 
     #[test]
     fn test_parse() {
-        let common_data = Arc::new(build_common_data(false, 1000));
+        let common_data = Arc::new(build_common_data(false,
+                                                     1000, 1,
+                                                     create_hash_builder("sum".to_string(), 1).unwrap()));
         let result = resp_parse(BUFFER, BUFFER.len(), common_data);
         assert_eq!(result.as_slice(), "+PONG\r\n+OK\r\n*2\r\n$4\r\nsave\r\n$0\r\n\r\n".as_bytes());
     }

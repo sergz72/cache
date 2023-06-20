@@ -43,21 +43,24 @@ pub struct CommonMaps {
     map_by_expiration: BTreeMap<u64, HashSet<Vec<u8>>>,
 }
 
+fn build_map(max_memory: usize) -> CommonMaps {
+    CommonMaps {
+        current_memory: 0,
+        max_memory,
+        map: HashMap::new(),
+        map_by_time: BTreeMap::new(),
+        map_by_expiration: BTreeMap::new(),
+    }
+}
+
 pub fn build_maps(vector_size: usize, all_memory: usize) -> Vec<RwLock<CommonMaps>> {
     let max_memory = all_memory / vector_size;
     (0..vector_size)
-        .map(|_i| {
-            RwLock::new(CommonMaps {
-                current_memory: 0,
-                max_memory,
-                map: HashMap::new(),
-                map_by_time: BTreeMap::new(),
-                map_by_expiration: BTreeMap::new(),
-            })
-        })
+        .map(|_i| RwLock::new(build_map(max_memory)))
         .collect()
 }
 
+#[derive(PartialEq, Debug)]
 pub enum GetResult {
     NotFound,
     Found,
@@ -76,23 +79,27 @@ impl CommonMaps {
         self.map_by_time.clear();
     }
 
-    pub fn removekey(&mut self, key: &Vec<u8>) -> isize {
-        if let Some(value) = self.map.remove(key) {
-            if let Some(ex) = value.expires_at {
-                let h = self.map_by_expiration.get_mut(&ex).unwrap();
-                if h.len() == 1 {
-                    self.map_by_expiration.remove(&ex);
-                } else {
-                    h.remove(key);
-                }
-            }
-            let h = self.map_by_time.get_mut(&value.created_at).unwrap();
+    fn remove_from_btree(&mut self, key: &Vec<u8>, value: Value) {
+        if let Some(ex) = value.expires_at {
+            let h = self.map_by_expiration.get_mut(&ex).unwrap();
             if h.len() == 1 {
-                self.map_by_time.remove(&value.created_at);
+                self.map_by_expiration.remove(&ex);
             } else {
                 h.remove(key);
             }
+        }
+        let h = self.map_by_time.get_mut(&value.created_at).unwrap();
+        if h.len() == 1 {
+            self.map_by_time.remove(&value.created_at);
+        } else {
+            h.remove(key);
+        }
+    }
+
+    pub fn removekey(&mut self, key: &Vec<u8>) -> isize {
+        if let Some(value) = self.map.remove(key) {
             self.current_memory -= calculate_record_size(key.len(), value.value.len());
+            self.remove_from_btree(key, value);
             return 1;
         }
         0
@@ -126,8 +133,12 @@ impl CommonMaps {
         let v = Value::new(value.clone(), created_at, expiry);
         let created_at = v.created_at;
         let expires_at = v.expires_at;
-        self.removekey(key);
-        self.map.insert(key.clone(), v);
+        if let Some(old) = self.map.insert(key.clone(), v) {
+            self.current_memory += value.len() - old.value.len();
+            self.remove_from_btree(key, old);
+        } else {
+            self.current_memory += calculate_record_size(key.len(), value.len());
+        }
         if let Some(ex) = expires_at {
             match self.map_by_expiration.get_mut(&ex) {
                 Some(v) => { let _ = v.insert(key.clone()); }
@@ -146,10 +157,66 @@ impl CommonMaps {
                 self.map_by_time.insert(created_at, s);
             }
         };
-        self.current_memory += calculate_record_size(key.len(), value.len());
     }
 
     pub fn size(&self) -> usize {
         self.map.len()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::thread;
+    use std::time::{Duration, SystemTime};
+    use rand::distributions::{Alphanumeric, DistString};
+    use rand::Rng;
+    use crate::common_maps::build_map;
+    use crate::common_maps::GetResult::{Expired, Found, NotFound};
+
+    #[test]
+    fn test_set_delete() {
+        let mut rng = rand::thread_rng();
+        let mut keys = Vec::new();
+        let mut maps = build_map(1000000);
+        let start_time = SystemTime::now();
+        for _i in 0..1000 {
+            let key_length = (rng.gen::<usize>() % 100) + 10;
+            let value_length = (rng.gen::<usize>() % 200) + 10;
+            let key = Alphanumeric.sample_string(&mut rng, key_length).into_bytes();
+            let value = Alphanumeric.sample_string(&mut rng, value_length).into_bytes();
+            maps.set(&key, &value, None, start_time);
+            keys.push(key);
+        }
+
+        for key in keys {
+            maps.removekey(&key);
+        }
+
+        assert_eq!(maps.map.len(), 0);
+        assert_eq!(maps.map_by_time.len(), 0);
+        assert_eq!(maps.map_by_expiration.len(), 0);
+        assert_eq!(maps.current_memory, 0);
+    }
+
+    #[test]
+    fn test_set_get() {
+        let mut rng = rand::thread_rng();
+        let mut maps = build_map(1000000);
+        let start_time = SystemTime::now();
+        let key_length = (rng.gen::<usize>() % 100) + 10;
+        let value_length = (rng.gen::<usize>() % 200) + 10;
+        let key = Alphanumeric.sample_string(&mut rng, key_length).into_bytes();
+        let key2 = Alphanumeric.sample_string(&mut rng, key_length).into_bytes();
+        let value = Alphanumeric.sample_string(&mut rng, value_length).into_bytes();
+        maps.set(&key, &value, Some(100), start_time);
+
+        let mut result = Vec::new();
+
+        assert_eq!(maps.get(&key, &mut result, start_time), Found);
+        assert_eq!(maps.get(&key2, &mut result, start_time), NotFound);
+
+        thread::sleep(Duration::from_millis(200));
+
+        assert_eq!(maps.get(&key, &mut result, start_time), Expired);
     }
 }
