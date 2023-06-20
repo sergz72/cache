@@ -5,6 +5,58 @@ pub trait HashBuilder {
     fn get_name(&self) -> &'static str;
 }
 
+struct DJB2HashBuilder {
+    max_value: usize
+}
+
+impl DJB2HashBuilder {
+    fn new(max_value: usize) -> DJB2HashBuilder {
+        DJB2HashBuilder{ max_value }
+    }
+}
+
+impl HashBuilder for DJB2HashBuilder {
+    fn build_hash(&self, key: &Vec<u8>) -> usize {
+        let mut hash = 5381;
+
+        for c in key {
+            hash = ((hash << 5) + hash) + *c as usize; /* hash * 33 + c */
+        }
+
+        hash % self.max_value
+    }
+
+    fn get_name(&self) -> &'static str {
+        "djb2"
+    }
+}
+
+struct SDBMHashBuilder {
+    max_value: usize
+}
+
+impl SDBMHashBuilder {
+    fn new(max_value: usize) -> SDBMHashBuilder {
+        SDBMHashBuilder{ max_value }
+    }
+}
+
+impl HashBuilder for SDBMHashBuilder {
+    fn build_hash(&self, key: &Vec<u8>) -> usize {
+        let mut hash = 0;
+
+        for c in key {
+            hash = (*c as usize) + (hash << 6) + (hash << 16) - hash;
+        }
+
+        hash % self.max_value
+    }
+
+    fn get_name(&self) -> &'static str {
+        "sdbm"
+    }
+}
+
 struct SumHashBuilder {
     max_value: usize
 }
@@ -99,6 +151,8 @@ pub fn create_hash_builder(name: String, max_value: usize) -> Result<Box<dyn Has
             }
         },
         "sum" => Ok(Box::new(SumHashBuilder::new(max_value))),
+        "djb2" => Ok(Box::new(DJB2HashBuilder::new(max_value))),
+        "sdbm" => Ok(Box::new(SDBMHashBuilder::new(max_value))),
         _ => Err(Error::new(ErrorKind::InvalidInput, "invalid hash builder type"))
     }
 }
