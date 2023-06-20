@@ -10,7 +10,7 @@
   -h host for client to connect (default is 127.0.0.1)<br>
   -b (benchmark mode)<br>
   -r number of requests per thread for benchmark (default is 50000)<br>
-  -m maximum memory for server (default is 1GB, check is not implemented yet)<br>
+  -m maximum memory for server (default is 1GB)<br>
   -t request types for benchmark (possible values - get,set, default: get,set)<br>
   --nx key expiration in ms for benchmark (default is 100 ms)<br>
   --th number of threads for benchmark (default is 10)<br>
