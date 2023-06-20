@@ -134,7 +134,7 @@ impl CommonMaps {
         let created_at = v.created_at;
         let expires_at = v.expires_at;
         if let Some(old) = self.map.insert(key.clone(), v) {
-            self.current_memory += value.len() - old.value.len();
+            self.current_memory = self.current_memory + value.len() - old.value.len();
             self.remove_from_btree(key, old);
         } else {
             self.current_memory += calculate_record_size(key.len(), value.len());
@@ -186,6 +186,12 @@ mod tests {
             let value = Alphanumeric.sample_string(&mut rng, value_length).into_bytes();
             maps.set(&key, &value, None, start_time);
             keys.push(key);
+        }
+
+        for key in &keys {
+            let value_length = (rng.gen::<usize>() % 200) + 10;
+            let value = Alphanumeric.sample_string(&mut rng, value_length).into_bytes();
+            maps.set(key, &value, None, start_time);
         }
 
         for key in keys {
