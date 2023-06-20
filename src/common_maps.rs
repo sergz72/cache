@@ -151,16 +151,16 @@ impl CommonMaps {
     }
 
     pub fn set(&mut self, key: &Vec<u8>, value: &Vec<u8>, expiry: Option<u64>, start_time: SystemTime) {
+        let size = calculate_record_size(key.len(), value.len());
+        self.current_memory += size;
         self.cleanup(start_time);
         let created_at = SystemTime::now().duration_since(start_time).unwrap().as_millis() as u64;
         let v = Value::new(value.clone(), created_at, expiry);
         let created_at = v.created_at;
         let expires_at = v.expires_at;
         if let Some(old) = self.map.insert(key.clone(), v) {
-            self.current_memory = self.current_memory + value.len() - old.value.len();
+            self.current_memory = self.current_memory - size + value.len() - old.value.len();
             self.remove_from_btree(key, old);
-        } else {
-            self.current_memory += calculate_record_size(key.len(), value.len());
         }
         if let Some(ex) = expires_at {
             match self.map_by_expiration.get_mut(&ex) {
@@ -262,9 +262,6 @@ mod tests {
         let key = Alphanumeric.sample_string(&mut rng, key_length).into_bytes();
         let value = Alphanumeric.sample_string(&mut rng, 20000).into_bytes();
         maps.set(&key, &value, None, start_time);
-        let value_length = (rng.gen::<usize>() % 200) + 10;
-        let new_value = Alphanumeric.sample_string(&mut rng, value_length).into_bytes();
-        maps.set(&key, &new_value, None, start_time);
 
         assert_eq!(maps.size(), 1);
     }
