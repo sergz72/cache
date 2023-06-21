@@ -62,7 +62,9 @@ Requests per thread = 50000<br>
 Threads = 10<br>
 Expiration = 100 ms<br>
 Request types = get,set,get,setpx<br>
-Elapsed: 4431 ms, 112841 requests per second 0 errors
+Preparing data for tests...<br>
+36 ms Starting tests...<br>
+Elapsed: 4095 ms, 122100 requests per second 0 errors
 
 **4. This application**<br>
 Command: cache -b -v<br>                  
@@ -73,4 +75,6 @@ Requests per thread = 50000<br>
 Threads = 10<br>
 Expiration = 100 ms<br>
 Request types = get,set,get,setpx<br>
-Elapsed: 3664 ms, 136462 requests per second 0 errors
+Preparing data for tests...
+30 ms Starting tests...
+Elapsed: 3520 ms, 142045 requests per second 0 errors
