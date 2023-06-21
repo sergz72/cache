@@ -11,7 +11,7 @@
   -b (benchmark mode)<br>
   -r number of requests per thread for benchmark (default is 50000)<br>
   -m maximum memory for server (default is 1GB)<br>
-  -t request types for benchmark (possible values - get,set, default: get,set)<br>
+  -t request types for benchmark (possible values - get,set,setpx,ping, default: get,set,get,setpx)<br>
   --nx key expiration in ms for benchmark (default is 100 ms)<br>
   --th number of threads for benchmark (default is 10)<br>
   --km numer of key maps (default 256)<br>
@@ -23,7 +23,7 @@
 2. get
 3. set key value
 4. set key value ex expiry
-5. set key value nx expiry
+5. set key value px expiry
 6. flushdb
 7. flushall
 8. del
@@ -44,14 +44,14 @@
 **Current benchmark results on my laptop:**
 
 **1. Redis server 7.0.11 64 bit**<br>
-Command: redis-benchmark -t get,set -q -n 100000<br>
-SET: 167785.23 requests per second, p50=0.143 msec                    
-GET: 177935.95 requests per second, p50=0.143 msec
+Command: redis-benchmark -t get,set -q -n 1000000<br>
+SET: 178284.89 requests per second, p50=0.143 msec                    
+GET: 179179.36 requests per second, p50=0.143 msec
 
 **2. This application**<br>
-Command: redis-benchmark -t get,set -q -n 100000<br>
-SET: 108459.87 requests per second, p50=0.255 msec                    
-GET: 125628.14 requests per second, p50=0.199 msec
+Command: redis-benchmark -t get,set -q -n 1000000<br>
+SET: 109914.27 requests per second, p50=0.255 msec                    
+GET: 109337.41 requests per second, p50=0.255 msec
 
 **3. Redis server 7.0.11 64 bit**<br>
 Command: cache -b -v<br>                  
@@ -61,8 +61,8 @@ Keys= 50000<br>
 Requests per thread = 50000<br>
 Threads = 10<br>
 Expiration = 100 ms<br>
-Request types = get,set<br>
-Elapsed: 4233 ms, 118119 requests per second
+Request types = get,set,get,setpx<br>
+Elapsed: 4431 ms, 112841 requests per second 0 errors
 
 **4. This application**<br>
 Command: cache -b -v<br>                  
@@ -72,5 +72,5 @@ Keys= 50000<br>
 Requests per thread = 50000<br>
 Threads = 10<br>
 Expiration = 100 ms<br>
-Request types = get,set<br>
-Elapsed: 3312 ms, 150966 requests per second
+Request types = get,set,get,setpx<br>
+Elapsed: 3664 ms, 136462 requests per second 0 errors
