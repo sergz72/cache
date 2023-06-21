@@ -18,7 +18,7 @@ use arguments_parser::{Arguments, IntParameter, SizeParameter, BoolParameter, Sw
 use crate::common_data::build_common_data;
 use ctrlc;
 use crate::benchmark::{benchmark_mode, BenchmarkCommand};
-use crate::benchmark::BenchmarkCommand::{Get, Set, SetNX};
+use crate::benchmark::BenchmarkCommand::{Get, Ping, Set, SetPX};
 use crate::hash_builders::{create_hash_builder, HashBuilder};
 use crate::resp_encoder::resp_encode_strings;
 use crate::server::server_start;
@@ -33,7 +33,7 @@ fn main() -> Result<(), Error> {
     let keys_parameter = IntParameter::new(50000);
     let requests_parameter = IntParameter::new(50000);
     let threads_parameter = IntParameter::new(10);
-    let types_parameter = StringParameter::new("get,set,get,setnx");
+    let types_parameter = StringParameter::new("get,set,get,setpx");
     let expiration_parameter = IntParameter::new(100);
     let vector_size_parameter = IntParameter::new(256);
     let hash_type_parameter = StringParameter::new("sum");
@@ -92,7 +92,8 @@ fn main() -> Result<(), Error> {
                 match s {
                     "get" => Some(Get),
                     "set" => Some(Set),
-                    "setnx" => Some(SetNX),
+                    "setpx" => Some(SetPX),
+                    "ping" => Some(Ping),
                     _ => None
                 }
             }).collect();

@@ -114,7 +114,7 @@ pub fn run_set_command(v: Vec<RespToken>, result: &mut Vec<u8>, common_data: Arc
                                         }
                                         return;
                                     }
-                                    'n'|'N' => {
+                                    'p'|'P' => {
                                         match &v[4] {
                                             RespInteger(ex) => {
                                                 set_with_result(k, vv, *ex, result, common_data);
