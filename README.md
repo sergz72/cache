@@ -75,6 +75,6 @@ Requests per thread = 50000<br>
 Threads = 10<br>
 Expiration = 100 ms<br>
 Request types = get,set,get,setpx<br>
-Preparing data for tests...
-30 ms Starting tests...
+Preparing data for tests...<br>
+30 ms Starting tests...<br>
 Elapsed: 3520 ms, 142045 requests per second 0 errors
