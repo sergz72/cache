@@ -110,11 +110,12 @@ pub fn build_maps(vector_size: usize, all_memory: usize, cleanup_using_lru: bool
         .collect())
 }
 
-pub fn load_maps(vector_size: usize, all_memory: usize, cleanup_using_lru: bool) -> Result<Arc<Vec<RwLock<CommonMaps>>>, Error> {
-    let max_memory = all_memory / vector_size;
+pub fn load_maps(db_name: String, vector_size: usize, all_memory: usize, cleanup_using_lru: bool) -> Result<Arc<Vec<RwLock<CommonMaps>>>, Error> {
+    /*let max_memory = all_memory / vector_size;
     Arc::new((0..vector_size)
         .map(|_i| RwLock::new(build_map(max_memory, cleanup_using_lru)))
-        .collect())
+        .collect())*/
+    todo!()
 }
 
 #[derive(PartialEq, Debug)]

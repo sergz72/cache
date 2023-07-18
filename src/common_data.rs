@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::sync::atomic::AtomicBool;
 use std::time::SystemTime;
 use crate::common_maps;
-use crate::common_maps::{build_maps, CommonMaps};
+use crate::common_maps::{build_maps, CommonMaps, load_maps};
 use crate::hash_builders::HashBuilder;
 use crate::server::WorkerData;
 
@@ -20,7 +20,8 @@ pub struct CommonData {
     pub threads: RwLock<HashMap<usize, Arc<Mutex<TcpStream>>>>,
     max_memory: usize,
     vector_size: usize,
-    cleanup_using_lru: bool
+    cleanup_using_lru: bool,
+    max_open_databases: usize
 }
 
 pub fn build_wrong_data_type_error() -> Error {
@@ -155,7 +156,7 @@ fn build_configuration() -> HashMap<Vec<u8>, Vec<u8>> {
 }
 
 pub fn build_common_data(verbose: bool, max_memory: usize, vector_size: usize, cleanup_using_lru: bool,
-                         hash_builder: Box<dyn HashBuilder + Send + Sync>) -> CommonData {
+                         max_open_databases: usize, hash_builder: Box<dyn HashBuilder + Send + Sync>) -> CommonData {
     CommonData {
         start_time: SystemTime::now(),
         hash_builder,
@@ -166,6 +167,7 @@ pub fn build_common_data(verbose: bool, max_memory: usize, vector_size: usize, c
         threads: RwLock::new(HashMap::new()),
         max_memory,
         vector_size,
-        cleanup_using_lru
+        cleanup_using_lru,
+        max_open_databases
     }
 }
