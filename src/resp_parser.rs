@@ -112,7 +112,7 @@ fn run_command(token: RespToken, result: &mut Vec<u8>, common_data: Arc<CommonDa
                                                 result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
                                             },
                                             's'|'S' => if check_name(s, 2, "et") {
-                                                run_hset_command(v, result, common_data);
+                                                run_hset_command(v, result, common_data, worker_data);
                                             } else {
                                                 result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
                                             },
@@ -131,6 +131,13 @@ fn run_command(token: RespToken, result: &mut Vec<u8>, common_data: Arc<CommonDa
                                         _ => result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes())
                                     }
                                 }
+                                'p'|'P' => {
+                                    if check_name(s, 1, "ing") {
+                                        run_ping_command(v, result);
+                                    } else {
+                                        result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
+                                    }
+                                },
                                 's'|'S' => {
                                     match s.len() {
                                         3 => if check_name(s, 1, "et") {
@@ -139,7 +146,7 @@ fn run_command(token: RespToken, result: &mut Vec<u8>, common_data: Arc<CommonDa
                                             result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
                                         },
                                         4 => if check_name(s, 1, "ave") {
-                                            run_save_command(result, common_data);
+                                            run_save_command(result, worker_data);
                                         } else {
                                             result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
                                         },
@@ -149,13 +156,6 @@ fn run_command(token: RespToken, result: &mut Vec<u8>, common_data: Arc<CommonDa
                                             result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
                                         },
                                         _ => result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes())
-                                    }
-                                },
-                                'p'|'P' => {
-                                    if check_name(s, 1, "ing") {
-                                        run_ping_command(v, result);
-                                    } else {
-                                        result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
                                     }
                                 },
                                 _ => result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes())
@@ -350,7 +350,7 @@ mod tests {
         let common_data = Arc::new(build_common_data(false,
                                                      1000, 1,
                                                      create_hash_builder("sum".to_string(), 1).unwrap()));
-        let mut worker_data = WorkerData{ current_db: common_data.select("0".to_string().into_bytes()) };
+        let mut worker_data = WorkerData::new("0".to_string().into_bytes(), common_data.clone()).unwrap();
         let result = resp_parse(BUFFER, BUFFER.len(), common_data, &mut worker_data);
         assert_eq!(result.as_slice(), "+PONG\r\n+OK\r\n*2\r\n$4\r\nsave\r\n$0\r\n\r\n".as_bytes());
     }

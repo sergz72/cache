@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use crate::resp_encoder::{resp_encode_array2, resp_encode_binary_string, resp_encode_int};
 use crate::resp_parser::{check_name, INVALID_COMMAND_ERROR, RespToken};
@@ -136,8 +136,10 @@ fn set_with_result(k: &Vec<u8>, vv: &Vec<u8>, e: isize, result: &mut Vec<u8>, co
     if e <= 0 {
         result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
     } else {
-        common_data.set(k, vv, Some(e as u64), worker_data);
-        result.extend_from_slice(OK);
+        match common_data.set(k, vv, Some(e as u64), worker_data) {
+            Ok(()) => result.extend_from_slice(OK),
+            Err(e) => result.extend_from_slice(e.to_string().as_bytes())
+        }
     }
 }
 
@@ -160,8 +162,10 @@ pub fn run_set_command(v: Vec<RespToken>, result: &mut Vec<u8>, common_data: Arc
         if let RespBinaryString(k) = &v[1] {
             if let RespBinaryString(vv) = &v[2] {
                 if l == 3 {
-                    common_data.set(k, vv, None, worker_data);
-                    result.extend_from_slice(OK);
+                    match common_data.set(k, vv, None, worker_data) {
+                        Ok(()) => result.extend_from_slice(OK),
+                        Err(e) => result.extend_from_slice(e.to_string().as_bytes())
+                    }
                     return;
                 } else if l == 5 {
                     if let RespBinaryString(option) = &v[3] {
@@ -216,11 +220,29 @@ pub fn run_set_command(v: Vec<RespToken>, result: &mut Vec<u8>, common_data: Arc
     result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
 }
 
-pub fn run_hset_command(v: Vec<RespToken>, result: &mut Vec<u8>, common_data: Arc<CommonData>) {
-    todo!()
+pub fn run_hset_command(v: Vec<RespToken>, result: &mut Vec<u8>, common_data: Arc<CommonData>, worker_data: &WorkerData) {
+    let l = v.len();
+    if l >= 4 && ((l & 1) == 0) {
+        if let RespBinaryString(key) = &v[1] {
+            let mut values = HashMap::new();
+            for i in (2..l).step_by(2) {
+                if let RespBinaryString(k) = &v[i] {
+                    if let RespBinaryString(v) = &v[i+1] {
+                        values.insert(k.clone(), v.clone());
+                    }
+                }
+            }
+            match common_data.hset(key, values, worker_data) {
+                Ok(count) => resp_encode_int(count, result),
+                Err(e) => result.extend_from_slice(e.to_string().as_bytes())
+            }
+            return;
+        }
+    }
+    result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
 }
 
-pub fn run_save_command(result: &mut Vec<u8>, common_data: Arc<CommonData>) {
+pub fn run_save_command(result: &mut Vec<u8>, worker_data: &WorkerData) {
     todo!()
 }
 

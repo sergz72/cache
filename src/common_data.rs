@@ -14,24 +14,26 @@ pub struct CommonData {
     hash_builder: Box<dyn HashBuilder + Send + Sync>,
     pub verbose: bool,
     pub configuration: HashMap<Vec<u8>, Vec<u8>>,
-    maps_map: Mutex<HashMap<Vec<u8>, Vec<RwLock<CommonMaps>>>>,
+    maps_map: RwLock<HashMap<String, Arc<Vec<RwLock<CommonMaps>>>>>,
     pub exit_flag: AtomicBool,
     pub threads: RwLock<HashMap<usize, Arc<Mutex<TcpStream>>>>,
     max_memory: usize,
     vector_size: usize,
+    cleanup_using_lru: bool
 }
 
-fn build_wrong_data_type_error() -> Error {
+pub fn build_wrong_data_type_error() -> Error {
     Error::new(ErrorKind::InvalidData, "-Operation against a key holding the wrong kind of value\r\n")
 }
 
 impl CommonData {
-    pub fn select(&self, db_name: Vec<u8>) -> &Vec<RwLock<CommonMaps>> {
-        self.maps_map.lock().unwrap().entry(db_name).or_insert(build_maps(self.vector_size, self.max_memory))
+    pub fn select(&self, db_name: String) -> Arc<Vec<RwLock<CommonMaps>>> {
+        self.maps_map.write().unwrap().entry(db_name).or_insert(
+            build_maps(self.vector_size, self.max_memory, self.cleanup_using_lru)).clone()
     }
 
     pub fn flush_all(&self) {
-        self.maps_map.lock().unwrap().values()
+        self.maps_map.read().unwrap().values()
             .for_each(|db|db.iter().for_each(|m|m.write().unwrap().flush()))
     }
 
@@ -62,12 +64,12 @@ impl CommonData {
         worker_data.current_db[idx].write().unwrap().hdel(key, keys)
     }
 
-    pub fn set(&self, key: &Vec<u8>, value: &Vec<u8>, expiry: Option<u64>, worker_data: &WorkerData) {
+    pub fn set(&self, key: &Vec<u8>, value: &Vec<u8>, expiry: Option<u64>, worker_data: &WorkerData) -> Result<(), Error> {
         let idx = self.hash_builder.build_hash(key);
-        worker_data.current_db[idx].write().unwrap().set(key, value, expiry, self.start_time);
+        worker_data.current_db[idx].write().unwrap().set(key, value, expiry, self.start_time)
     }
 
-    pub fn hset(&self, key: &Vec<u8>, values: HashMap<Vec<u8>, Vec<u8>>, worker_data: &WorkerData) -> Result<(), Error> {
+    pub fn hset(&self, key: &Vec<u8>, values: HashMap<Vec<u8>, Vec<u8>>, worker_data: &WorkerData) -> Result<isize, Error> {
         let idx = self.hash_builder.build_hash(key);
         worker_data.current_db[idx].write().unwrap().hset(key, values, self.start_time)
     }
@@ -128,17 +130,18 @@ fn build_configuration() -> HashMap<Vec<u8>, Vec<u8>> {
         ("appendonly".to_string().into_bytes(), "no".to_string().into_bytes())])
 }
 
-pub fn build_common_data(verbose: bool, max_memory: usize, vector_size: usize,
+pub fn build_common_data(verbose: bool, max_memory: usize, vector_size: usize, cleanup_using_lru: bool,
                          hash_builder: Box<dyn HashBuilder + Send + Sync>) -> CommonData {
     CommonData {
         start_time: SystemTime::now(),
         hash_builder,
         verbose,
         configuration: build_configuration(),
-        maps_map: Mutex::new(HashMap::new()),
+        maps_map: RwLock::new(HashMap::new()),
         exit_flag: AtomicBool::new(false),
         threads: RwLock::new(HashMap::new()),
         max_memory,
-        vector_size
+        vector_size,
+        cleanup_using_lru
     }
 }

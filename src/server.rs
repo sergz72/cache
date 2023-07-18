@@ -1,4 +1,4 @@
-use std::io::{Error, Read, Write};
+use std::io::{Error, ErrorKind, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::ops::DerefMut;
 use std::sync::{Arc, Mutex, RwLock};
@@ -8,13 +8,35 @@ use crate::common_data::CommonData;
 use crate::common_maps::CommonMaps;
 use crate::resp_parser::resp_parse;
 
-pub struct WorkerData<'a> {
-    pub current_db: &'a Vec<RwLock<CommonMaps>>
+pub struct WorkerData {
+    pub current_db_name: String,
+    pub current_db: Arc<Vec<RwLock<CommonMaps>>>
+}
+
+impl WorkerData {
+    pub fn new(db_name: Vec<u8>, common_data: Arc<CommonData>) -> Result<WorkerData, Error> {
+        let current_db_name = match String::from_utf8(db_name) {
+            Ok(name) => name,
+            Err(_) => return Err(Error::new(ErrorKind::InvalidData, "invalid database name"))
+        };
+        let db_name_clone = current_db_name.clone();
+        Ok(WorkerData{ current_db_name, current_db: common_data.select(db_name_clone) })
+    }
+
+    pub fn select(&mut self, db_name: Vec<u8>, common_data: Arc<CommonData>) -> Result<(), Error> {
+        let current_db_name = match String::from_utf8(db_name) {
+            Ok(name) => name,
+            Err(_) => return Err(Error::new(ErrorKind::InvalidData, "invalid database name"))
+        };
+        self.current_db_name = current_db_name.clone();
+        self.current_db = common_data.select(current_db_name);
+        Ok(())
+    }
 }
 
 pub fn work_handler<'a>(idx: usize, stream: Arc<Mutex<TcpStream>>, common_data: Arc<CommonData>) {
     let mut buffer = [0; 1000000];
-    let mut worker_data = WorkerData{ current_db: common_data.select("0".to_string().into_bytes()) };
+    let mut worker_data = WorkerData::new("0".to_string().into_bytes(), common_data.clone()).unwrap();
     loop {
         let mut guard = stream.lock().unwrap();
         let s = guard.deref_mut();

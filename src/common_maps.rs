@@ -1,7 +1,8 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::io::Error;
-use std::sync::RwLock;
+use std::io::{Error, ErrorKind};
+use std::sync::{Arc, RwLock};
 use std::time::SystemTime;
+use crate::common_data::build_wrong_data_type_error;
 use crate::common_maps::GetResult::{Expired, Found, NotFound, WrongValue};
 use crate::resp_encoder::{resp_encode_binary_string, resp_encode_map};
 
@@ -27,13 +28,12 @@ impl Value {
         }
     }
 
-    fn new_hash(map: HashMap<Vec<u8>, Vec<u8>>, created_at: u64, expiration: Option<u64>) -> Value {
-        let expires_at = expiration.map(|e| created_at + e);
+    fn new_hash(map: HashMap<Vec<u8>, Vec<u8>>, created_at: u64) -> Value {
         Value {
             value: None,
             hvalue: Some(map),
             created_at,
-            expires_at,
+            expires_at: None,
         }
     }
 
@@ -59,9 +59,32 @@ impl Value {
         self.value.as_ref().map(|v|v.len()).unwrap_or(0) +
             self.hvalue.as_ref().map(|v|calculate_map_size(&v)).unwrap_or(0)
     }
+
+    fn merge(&mut self, source: HashMap<Vec<u8>, Vec<u8>>) -> Result<isize, Error> {
+        let hv = self.hvalue.as_mut().ok_or(build_wrong_data_type_error())?;
+        let mut inserted = 0;
+        for (k, v) in source {
+            if None == hv.insert(k, v) {
+                inserted += 1;
+            }
+        }
+        Ok(inserted)
+    }
+
+    fn delete(&mut self, source: HashSet<&Vec<u8>>) -> Result<(isize, usize), Error> {
+        let hv = self.hvalue.as_mut().ok_or(build_wrong_data_type_error())?;
+        let mut deleted = 0;
+        for k in source {
+            if let Some(_) = hv.remove(k) {
+                deleted += 1;
+            }
+        }
+        Ok((deleted, hv.len()))
+    }
 }
 
 pub struct CommonMaps {
+    cleanup_using_lru: bool,
     max_memory: usize,
     current_memory: usize,
     map: HashMap<Vec<u8>, Value>,
@@ -69,8 +92,9 @@ pub struct CommonMaps {
     map_by_expiration: BTreeMap<u64, HashSet<Vec<u8>>>,
 }
 
-fn build_map(max_memory: usize) -> CommonMaps {
+fn build_map(max_memory: usize, cleanup_using_lru: bool) -> CommonMaps {
     CommonMaps {
+        cleanup_using_lru,
         current_memory: 0,
         max_memory,
         map: HashMap::new(),
@@ -79,11 +103,11 @@ fn build_map(max_memory: usize) -> CommonMaps {
     }
 }
 
-pub fn build_maps(vector_size: usize, all_memory: usize) -> Vec<RwLock<CommonMaps>> {
+pub fn build_maps(vector_size: usize, all_memory: usize, cleanup_using_lru: bool) -> Arc<Vec<RwLock<CommonMaps>>> {
     let max_memory = all_memory / vector_size;
-    (0..vector_size)
-        .map(|_i| RwLock::new(build_map(max_memory)))
-        .collect()
+    Arc::new((0..vector_size)
+        .map(|_i| RwLock::new(build_map(max_memory, cleanup_using_lru)))
+        .collect())
 }
 
 #[derive(PartialEq, Debug)]
@@ -96,6 +120,10 @@ pub enum GetResult {
 
 fn calculate_record_size(key_size: usize, value_size: usize) -> usize {
     3 * key_size + value_size + 16
+}
+
+fn build_out_of_memory_error() -> Error {
+    Error::new(ErrorKind::OutOfMemory, "out of memory")
 }
 
 impl CommonMaps {
@@ -204,29 +232,43 @@ impl CommonMaps {
         }
     }
 
-    fn cleanup(&mut self, start_time: SystemTime) {
+    fn cleanup(&mut self, start_time: SystemTime) -> bool {
         if self.current_memory >= self.max_memory {
             self.remove_expired(start_time);
-            while self.current_memory >= self.max_memory {
-                //remove by lru
-                let (_k, v) = self.map_by_time.first_key_value().unwrap();
-                v.clone().iter().for_each(|k| { let _ = self.removekey(k); });
+            if self.cleanup_using_lru {
+                while self.current_memory >= self.max_memory {
+                    //remove by lru
+                    let (_k, v) = self.map_by_time.first_key_value().unwrap();
+                    v.clone().iter().for_each(|k| { let _ = self.removekey(k); });
+                }
+            } else if self.current_memory >= self.max_memory {
+                return false;
             }
         }
+        true
     }
 
-    pub fn set(&mut self, key: &Vec<u8>, value: &Vec<u8>, expiry: Option<u64>, start_time: SystemTime) {
-        let size = calculate_record_size(key.len(), value.len());
-        self.current_memory += size;
-        self.cleanup(start_time);
+    pub fn set(&mut self, key: &Vec<u8>, value: &Vec<u8>, expiry: Option<u64>, start_time: SystemTime) -> Result<(), Error> {
         let created_at = SystemTime::now().duration_since(start_time).unwrap().as_millis() as u64;
         let v = Value::new(value.clone(), created_at, expiry);
+        let size = calculate_record_size(key.len(), v.size());
+        self.current_memory += size;
+        if !self.cleanup(start_time) {
+            self.current_memory -= size;
+            return Err(build_out_of_memory_error());
+        }
         let created_at = v.created_at;
         let expires_at = v.expires_at;
+        let v_size = v.size();
         if let Some(old) = self.map.insert(key.clone(), v) {
-            self.current_memory = self.current_memory - size + value.len() - old.size();
+            self.current_memory = self.current_memory - size + v_size - old.size();
             self.remove_from_btree(key, old);
         }
+        self.add_to_maps(key, created_at, expires_at);
+        Ok(())
+    }
+
+    fn add_to_maps(&mut self, key: &Vec<u8>, created_at: u64, expires_at: Option<u64>) {
         if let Some(ex) = expires_at {
             match self.map_by_expiration.get_mut(&ex) {
                 Some(v) => { let _ = v.insert(key.clone()); }
@@ -247,12 +289,48 @@ impl CommonMaps {
         };
     }
 
-    pub fn hset(&mut self, key: &Vec<u8>, values: HashMap<Vec<u8>, Vec<u8>>, start_time: SystemTime) -> Result<(), Error> {
-        todo!()
+    pub fn hset(&mut self, key: &Vec<u8>, values: HashMap<Vec<u8>, Vec<u8>>, start_time: SystemTime) -> Result<isize, Error> {
+        let created_at = SystemTime::now().duration_since(start_time).unwrap().as_millis() as u64;
+        let values_len = values.len() as isize;
+        let v = Value::new_hash(values, created_at);
+        let size = calculate_record_size(key.len(), v.size());
+        self.current_memory += size;
+        if !self.cleanup(start_time) {
+            self.current_memory -= size;
+            return Err(build_out_of_memory_error());
+        }
+        let created_at = v.created_at;
+        let expires_at = v.expires_at;
+        match self.map.get_mut(key) {
+            Some(existing) => {
+                let size_before = existing.size();
+                let inserted = existing.merge(v.hvalue.unwrap())?;
+                self.current_memory -= size_before;
+                self.current_memory += existing.size();
+                Ok(inserted)
+            },
+            None => {
+                self.map.insert(key.clone(), v);
+                self.add_to_maps(key, created_at, expires_at);
+                Ok(values_len)
+            },
+        }
     }
 
     pub fn hdel(&mut self, key: &Vec<u8>, values: HashSet<&Vec<u8>>) -> Result<isize, Error> {
-        todo!()
+        match self.map.get_mut(key) {
+            Some(existing) => {
+                let size_before = existing.size();
+                let (deleted, l) = existing.delete(values)?;
+                self.current_memory -= size_before;
+                self.current_memory += existing.size();
+                if l == 0 {
+                    self.removekey(key);
+                }
+                Ok(deleted)
+            },
+            None => Ok(0),
+        }
     }
 
     pub fn size(&self) -> usize {

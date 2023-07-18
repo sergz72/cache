@@ -37,6 +37,7 @@ fn main() -> Result<(), Error> {
     let expiration_parameter = IntParameter::new(100);
     let vector_size_parameter = IntParameter::new(256);
     let hash_type_parameter = StringParameter::new("sum");
+    let cleanup_type_parameter = BoolParameter::new();
     let switches = [
         Switch::new("host for client to connect", Some('h'), None, &host_parameter),
         Switch::new("port", Some('p'), None, &port_parameter),
@@ -51,6 +52,7 @@ fn main() -> Result<(), Error> {
         Switch::new("key expiration in ms for benchmark", None, Some("nx"), &expiration_parameter),
         Switch::new("numer of key maps", None, Some("km"), &vector_size_parameter),
         Switch::new("hash builder type", None, Some("hb"), &hash_type_parameter),
+        Switch::new("cleanup using lru", None, Some("lru"), &cleanup_type_parameter),
     ];
     let mut arguments = Arguments::new("cache", &switches);
     if let Err(e) = arguments.build(args().skip(1).collect()) {
@@ -129,11 +131,12 @@ fn main() -> Result<(), Error> {
         }
         let vs = vector_size as usize;
         let hash_builder = create_hash_builder(hash_type_parameter.get_value(), vs)?;
+        let cleanup_using_lru = cleanup_type_parameter.get_value();
         if verbose {
-            println!("Port = {}\nMaximum memory = {}\nVector size = {}\nHash builder = {}", port,
-                     max_memory, vector_size, hash_builder.get_name());
+            println!("Port = {}\nMaximum memory = {}\nVector size = {}\nHash builder = {}\nCleanup using lru = {}", port,
+                     max_memory, vector_size, hash_builder.get_name(), cleanup_using_lru);
         }
-        server_mode(verbose, max_memory as usize, p, vs, hash_builder)
+        server_mode(verbose, max_memory as usize, p, vs, cleanup_using_lru, hash_builder)
     }
 }
 
@@ -154,9 +157,9 @@ fn client_mode(other_arguments: &Vec<String>, port: u16, host: String) -> Result
     Ok(())
 }
 
-fn server_mode(verbose: bool, max_memory: usize, port: u16, vector_size: usize,
+fn server_mode(verbose: bool, max_memory: usize, port: u16, vector_size: usize, cleanup_using_lru: bool,
                hash_builder: Box<dyn HashBuilder + Sync + Send>) -> Result<(), Error> {
-    let common_data = Arc::new(build_common_data(verbose, max_memory, vector_size, hash_builder));
+    let common_data = Arc::new(build_common_data(verbose, max_memory, vector_size, cleanup_using_lru, hash_builder));
     let c = common_data.clone();
     ctrlc::set_handler(move || {
         c.exit_flag.store(true, Ordering::Relaxed);
