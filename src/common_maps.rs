@@ -9,7 +9,7 @@ use crate::resp_encoder::{resp_encode_binary_string, resp_encode_map};
 struct Value {
     value: Option<Vec<u8>>,
     hvalue: Option<HashMap<Vec<u8>, Vec<u8>>>,
-    created_at: u64,
+    last_access_time: u64,
     expires_at: Option<u64>,
 }
 
@@ -23,7 +23,7 @@ impl Value {
         Value {
             value: Some(value),
             hvalue: None,
-            created_at,
+            last_access_time: created_at,
             expires_at,
         }
     }
@@ -32,7 +32,7 @@ impl Value {
         Value {
             value: None,
             hvalue: Some(map),
-            created_at,
+            last_access_time: created_at,
             expires_at: None,
         }
     }
