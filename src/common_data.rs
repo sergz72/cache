@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::collections::hash_map::Entry;
 use std::io::{Error, ErrorKind};
 use std::net::TcpStream;
 use std::sync::{Arc, Mutex, RwLock};
@@ -30,6 +31,29 @@ impl CommonData {
     pub fn select(&self, db_name: String) -> Arc<Vec<RwLock<CommonMaps>>> {
         self.maps_map.write().unwrap().entry(db_name).or_insert(
             build_maps(self.vector_size, self.max_memory, self.cleanup_using_lru)).clone()
+    }
+
+    pub fn createdb(&self, db_name: String) -> Result<Arc<Vec<RwLock<CommonMaps>>>, Error> {
+        match self.maps_map.write().unwrap().entry(db_name) {
+            Entry::Occupied(_) => Err(Error::new(ErrorKind::AlreadyExists, "-database already exists\r\n")),
+            Entry::Vacant(e) => {
+                let maps = build_maps(self.vector_size, self.max_memory, self.cleanup_using_lru);
+                e.insert(maps.clone());
+                Ok(maps)
+            }
+        }
+    }
+
+    pub fn loaddb(&self, db_name: String) -> Result<Arc<Vec<RwLock<CommonMaps>>>, Error> {
+        let db_name_clone = db_name.clone();
+        match self.maps_map.write().unwrap().entry(db_name) {
+            Entry::Occupied(e) => Ok(e.get().clone()),
+            Entry::Vacant(e) => {
+                let maps = load_maps(db_name_clone, self.vector_size, self.max_memory, self.cleanup_using_lru)?;
+                e.insert(maps.clone());
+                Ok(maps)
+            }
+        }
     }
 
     pub fn flush_all(&self) {

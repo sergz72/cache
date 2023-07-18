@@ -13,23 +13,37 @@ pub struct WorkerData {
     pub current_db: Arc<Vec<RwLock<CommonMaps>>>
 }
 
+fn parse_db_name(db_name: Vec<u8>) -> Result<String, Error> {
+    String::from_utf8(db_name).map_err(|_|Error::new(ErrorKind::InvalidData, "-invalid database name\r\n"))
+}
+
 impl WorkerData {
     pub fn new(db_name: Vec<u8>, common_data: Arc<CommonData>) -> Result<WorkerData, Error> {
-        let current_db_name = match String::from_utf8(db_name) {
-            Ok(name) => name,
-            Err(_) => return Err(Error::new(ErrorKind::InvalidData, "invalid database name"))
-        };
+        let current_db_name = parse_db_name(db_name)?;
         let db_name_clone = current_db_name.clone();
         Ok(WorkerData{ current_db_name, current_db: common_data.select(db_name_clone) })
     }
 
     pub fn select(&mut self, db_name: Vec<u8>, common_data: Arc<CommonData>) -> Result<(), Error> {
-        let current_db_name = match String::from_utf8(db_name) {
-            Ok(name) => name,
-            Err(_) => return Err(Error::new(ErrorKind::InvalidData, "invalid database name"))
-        };
+        let current_db_name = parse_db_name(db_name)?;
         self.current_db_name = current_db_name.clone();
         self.current_db = common_data.select(current_db_name);
+        Ok(())
+    }
+
+    pub fn createdb(&mut self, db_name: Vec<u8>, common_data: Arc<CommonData>) -> Result<(), Error> {
+        let current_db_name = parse_db_name(db_name)?;
+        let current_db = common_data.createdb(current_db_name.clone())?;
+        self.current_db_name = current_db_name;
+        self.current_db = current_db;
+        Ok(())
+    }
+
+    pub fn loaddb(&mut self, db_name: Vec<u8>, common_data: Arc<CommonData>) -> Result<(), Error> {
+        let current_db_name = parse_db_name(db_name)?;
+        let current_db = common_data.loaddb(current_db_name.clone())?;
+        self.current_db_name = current_db_name;
+        self.current_db = current_db;
         Ok(())
     }
 }

@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use crate::resp_commands::{run_config_command, run_dbsize_command, run_del_command, run_flush_command, run_flushall_command, run_get_command, run_hdel_command, run_hget_command, run_hgetall_command, run_hset_command, run_ping_command, run_save_command, run_select_command, run_set_command};
+use crate::resp_commands::{run_config_command, run_createdb_command, run_dbsize_command, run_del_command, run_flush_command, run_flushall_command, run_get_command, run_hdel_command, run_hget_command, run_hgetall_command, run_hset_command, run_loaddb_command, run_ping_command, run_save_command, run_select_command, run_set_command};
 use crate::resp_parser::RespToken::{RespArray, RespBinaryString, RespInteger, RespNullArray, RespNullString, RespString};
 use crate::common_data::CommonData;
 use crate::server::WorkerData;
@@ -56,10 +56,22 @@ fn run_command(token: RespToken, result: &mut Vec<u8>, common_data: Arc<CommonDa
                         if s.len() > 0 {
                             match s[0] as char {
                                 'c'|'C' => {
-                                    if check_name(s, 1, "onfig") {
-                                        run_config_command(v, result, common_data);
-                                    } else {
-                                        result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
+                                    match s.len() {
+                                        6 => {
+                                            if check_name(s, 1, "onfig") {
+                                                run_config_command(v, result, common_data);
+                                            } else {
+                                                result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
+                                            }
+                                        },
+                                        8 => {
+                                            if check_name(s, 1, "reatedb") {
+                                                run_createdb_command(v, result, common_data, worker_data);
+                                            } else {
+                                                result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
+                                            }
+                                        },
+                                        _ => result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes())
                                     }
                                 },
                                 'd'|'D' => {
@@ -130,7 +142,14 @@ fn run_command(token: RespToken, result: &mut Vec<u8>, common_data: Arc<CommonDa
                                         },
                                         _ => result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes())
                                     }
-                                }
+                                },
+                                'l'|'L' => {
+                                    if check_name(s, 1, "oaddb") {
+                                        run_loaddb_command(v, result, common_data, worker_data);
+                                    } else {
+                                        result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
+                                    }
+                                },
                                 'p'|'P' => {
                                     if check_name(s, 1, "ing") {
                                         run_ping_command(v, result);
@@ -151,7 +170,7 @@ fn run_command(token: RespToken, result: &mut Vec<u8>, common_data: Arc<CommonDa
                                             result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
                                         },
                                         6 => if check_name(s, 1, "elect") {
-                                            run_select_command(result);
+                                            run_select_command(v, result, common_data, worker_data);
                                         } else {
                                             result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
                                         },

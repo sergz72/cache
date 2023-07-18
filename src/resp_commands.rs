@@ -21,8 +21,43 @@ pub fn run_ping_command(v: Vec<RespToken>, result: &mut Vec<u8>) {
     result.extend_from_slice(PONG);
 }
 
-pub fn run_select_command(result: &mut Vec<u8>) {
-    result.extend_from_slice(OK);
+pub fn run_select_command(v: Vec<RespToken>, result: &mut Vec<u8>, common_data: Arc<CommonData>, worker_data: &mut WorkerData) {
+    if v.len() == 2 {
+        if let RespBinaryString(db_name) = &v[1] {
+            match worker_data.select(db_name.clone(), common_data) {
+                Ok(()) => result.extend_from_slice(OK),
+                Err(e) => result.extend_from_slice(e.to_string().as_bytes())
+            }
+            return;
+        }
+    }
+    result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
+}
+
+pub fn run_createdb_command(v: Vec<RespToken>, result: &mut Vec<u8>, common_data: Arc<CommonData>, worker_data: &mut WorkerData) {
+    if v.len() == 2 {
+        if let RespBinaryString(db_name) = &v[1] {
+            match worker_data.createdb(db_name.clone(), common_data) {
+                Ok(()) => result.extend_from_slice(OK),
+                Err(e) => result.extend_from_slice(e.to_string().as_bytes())
+            }
+            return;
+        }
+    }
+    result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
+}
+
+pub fn run_loaddb_command(v: Vec<RespToken>, result: &mut Vec<u8>, common_data: Arc<CommonData>, worker_data: &mut WorkerData) {
+    if v.len() == 2 {
+        if let RespBinaryString(db_name) = &v[1] {
+            match worker_data.loaddb(db_name.clone(), common_data) {
+                Ok(()) => result.extend_from_slice(OK),
+                Err(e) => result.extend_from_slice(e.to_string().as_bytes())
+            }
+            return;
+        }
+    }
+    result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
 }
 
 pub fn run_flush_command(result: &mut Vec<u8>, worker_data: &WorkerData) {
