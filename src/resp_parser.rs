@@ -1,7 +1,8 @@
 use std::sync::Arc;
-use crate::resp_commands::{run_config_command, run_dbsize_command, run_del_command, run_flush_command, run_get_command, run_ping_command, run_select_command, run_set_command};
+use crate::resp_commands::{run_config_command, run_dbsize_command, run_del_command, run_flush_command, run_flushall_command, run_get_command, run_hdel_command, run_hget_command, run_hgetall_command, run_hset_command, run_ping_command, run_save_command, run_select_command, run_set_command};
 use crate::resp_parser::RespToken::{RespArray, RespBinaryString, RespInteger, RespNullArray, RespNullString, RespString};
 use crate::common_data::CommonData;
+use crate::server::WorkerData;
 
 pub trait RespCommand {
     fn run(&self, common_data: Arc<CommonData>) -> Vec<u8>;
@@ -19,14 +20,14 @@ pub enum RespToken {
 
 pub static INVALID_COMMAND_ERROR: &str = "-invalid command\r\n";
 
-pub fn resp_parse(buffer: &[u8], amt: usize, common_data: Arc<CommonData>) -> Vec<u8> {
+pub fn resp_parse(buffer: &[u8], amt: usize, common_data: Arc<CommonData>, worker_data: &mut WorkerData) -> Vec<u8> {
     let tokens = match parse_tokens(buffer, amt) {
         Ok(t) => t,
         Err(e) => return Vec::from(e)
     };
     let mut result = Vec::new();
     for token in tokens {
-        run_command(token, &mut result, common_data.clone());
+        run_command(token, &mut result, common_data.clone(), worker_data);
     }
     result
 }
@@ -46,7 +47,7 @@ pub fn check_name(s: &Vec<u8>, idx: usize, expected: &str) -> bool {
     false
 }
 
-fn run_command(token: RespToken, result: &mut Vec<u8>, common_data: Arc<CommonData>) {
+fn run_command(token: RespToken, result: &mut Vec<u8>, common_data: Arc<CommonData>, worker_data: &mut WorkerData) {
     match token {
         RespArray(v) => {
             if v.len() > 0 {
@@ -64,12 +65,12 @@ fn run_command(token: RespToken, result: &mut Vec<u8>, common_data: Arc<CommonDa
                                 'd'|'D' => {
                                     match s.len() {
                                         3 => if check_name(s, 1, "el") {
-                                            run_del_command(v, result, common_data);
+                                            run_del_command(v, result, common_data, worker_data);
                                         } else {
                                             result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
                                         },
                                         6 => if check_name(s, 1, "bsize") {
-                                            run_dbsize_command(result, common_data);
+                                            run_dbsize_command(result, worker_data);
                                         } else {
                                             result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
                                         },
@@ -80,14 +81,14 @@ fn run_command(token: RespToken, result: &mut Vec<u8>, common_data: Arc<CommonDa
                                     match s.len() {
                                         7 => {
                                             if check_name(s, 1, "lushdb") {
-                                                run_flush_command(result, common_data);
+                                                run_flush_command(result, worker_data);
                                             } else {
                                                 result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
                                             }
                                         }
                                         8 => {
                                             if check_name(s, 1, "lushall") {
-                                                run_flush_command(result, common_data);
+                                                run_flushall_command(result, common_data);
                                             } else {
                                                 result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
                                             }
@@ -97,15 +98,48 @@ fn run_command(token: RespToken, result: &mut Vec<u8>, common_data: Arc<CommonDa
                                 },
                                 'g'|'G' => {
                                     if check_name(s, 1, "et") {
-                                        run_get_command(v, result, common_data);
+                                        run_get_command(v, result, common_data, worker_data);
                                     } else {
                                         result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
                                     }
                                 },
+                                'h'|'H' => {
+                                    match s.len() {
+                                        4 => match s[1] as char {
+                                            'g'|'G' => if check_name(s, 2, "et") {
+                                                run_hget_command(v, result, common_data, worker_data);
+                                            } else {
+                                                result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
+                                            },
+                                            's'|'S' => if check_name(s, 2, "et") {
+                                                run_hset_command(v, result, common_data);
+                                            } else {
+                                                result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
+                                            },
+                                            'd'|'D' => if check_name(s, 2, "el") {
+                                                run_hdel_command(v, result, common_data, worker_data);
+                                            } else {
+                                                result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
+                                            },
+                                            _ => result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes())
+                                        },
+                                        7 => if check_name(s, 1, "getall") {
+                                            run_hgetall_command(v, result, common_data, worker_data);
+                                        } else {
+                                            result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
+                                        },
+                                        _ => result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes())
+                                    }
+                                }
                                 's'|'S' => {
                                     match s.len() {
                                         3 => if check_name(s, 1, "et") {
-                                            run_set_command(v, result, common_data);
+                                            run_set_command(v, result, common_data, worker_data);
+                                        } else {
+                                            result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
+                                        },
+                                        4 => if check_name(s, 1, "ave") {
+                                            run_save_command(result, common_data);
                                         } else {
                                             result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
                                         },
@@ -274,6 +308,7 @@ mod tests {
     use crate::hash_builders::create_hash_builder;
     use crate::resp_parser::{parse_tokens, resp_parse};
     use crate::resp_parser::RespToken::{RespArray, RespBinaryString, RespInteger, RespString};
+    use crate::server::WorkerData;
 
     const BUFFER: &[u8] = "PING\r\n*5\r\n$3\r\nset\r\n$1\r\na\r\n$1\r\nb\r\n$2\r\nex\r\n:10\r\n*3\r\n$6\r\nconfig\r\n$3\r\nget\r\n$4\r\nsave\r\n".as_bytes();
 
@@ -315,7 +350,8 @@ mod tests {
         let common_data = Arc::new(build_common_data(false,
                                                      1000, 1,
                                                      create_hash_builder("sum".to_string(), 1).unwrap()));
-        let result = resp_parse(BUFFER, BUFFER.len(), common_data);
+        let mut worker_data = WorkerData{ current_db: common_data.select("0".to_string().into_bytes()) };
+        let result = resp_parse(BUFFER, BUFFER.len(), common_data, &mut worker_data);
         assert_eq!(result.as_slice(), "+PONG\r\n+OK\r\n*2\r\n$4\r\nsave\r\n$0\r\n\r\n".as_bytes());
     }
 }

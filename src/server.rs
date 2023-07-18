@@ -1,14 +1,20 @@
 use std::io::{Error, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::ops::DerefMut;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::sync::atomic::Ordering;
 use std::thread;
 use crate::common_data::CommonData;
+use crate::common_maps::CommonMaps;
 use crate::resp_parser::resp_parse;
+
+pub struct WorkerData<'a> {
+    pub current_db: &'a Vec<RwLock<CommonMaps>>
+}
 
 pub fn work_handler<'a>(idx: usize, stream: Arc<Mutex<TcpStream>>, common_data: Arc<CommonData>) {
     let mut buffer = [0; 1000000];
+    let mut worker_data = WorkerData{ current_db: common_data.select("0".to_string().into_bytes()) };
     loop {
         let mut guard = stream.lock().unwrap();
         let s = guard.deref_mut();
@@ -18,7 +24,7 @@ pub fn work_handler<'a>(idx: usize, stream: Arc<Mutex<TcpStream>>, common_data: 
                 if amt == 0 {
                     break;
                 }
-                let _ = s.write_all(resp_parse(&buffer, amt, common_data.clone()).as_slice());
+                let _ = s.write_all(resp_parse(&buffer, amt, common_data.clone(), &mut worker_data).as_slice());
             },
             Err(e) => {
                 if common_data.exit_flag.load(Ordering::Relaxed) {

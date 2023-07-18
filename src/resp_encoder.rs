@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 static RN: &[u8] = "\r\n".as_bytes();
 
 /*pub fn resp_encode_array(commands: &Vec<&Vec<u8>>) -> Vec<u8> {
@@ -10,6 +12,16 @@ static RN: &[u8] = "\r\n".as_bytes();
     }
     result
 }*/
+
+pub fn resp_encode_map(map: &HashMap<Vec<u8>, Vec<u8>>, result: &mut Vec<u8>) {
+    result.push('*' as u8);
+    result.extend((map.len() * 2).to_string().into_bytes());
+    result.extend_from_slice(RN);
+    for (k, v) in map {
+        resp_encode_binary_string(k, result);
+        resp_encode_binary_string(v, result);
+    }
+}
 
 pub fn resp_encode_array2(c1: &Vec<u8>, c2: &Vec<u8>, result: &mut Vec<u8>) {
     result.push('*' as u8);

@@ -1,20 +1,37 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::io::Error;
 use std::sync::RwLock;
 use std::time::SystemTime;
-use crate::common_maps::GetResult::{Expired, Found, NotFound};
-use crate::resp_encoder::resp_encode_binary_string;
+use crate::common_maps::GetResult::{Expired, Found, NotFound, WrongValue};
+use crate::resp_encoder::{resp_encode_binary_string, resp_encode_map};
 
 struct Value {
-    value: Vec<u8>,
+    value: Option<Vec<u8>>,
+    hvalue: Option<HashMap<Vec<u8>, Vec<u8>>>,
     created_at: u64,
     expires_at: Option<u64>,
+}
+
+fn calculate_map_size(map: &HashMap<Vec<u8>, Vec<u8>>) -> usize {
+    map.iter().fold(0, |s, (k, v)| s + k.len() + v.len())
 }
 
 impl Value {
     fn new(value: Vec<u8>, created_at: u64, expiration: Option<u64>) -> Value {
         let expires_at = expiration.map(|e| created_at + e);
         Value {
-            value,
+            value: Some(value),
+            hvalue: None,
+            created_at,
+            expires_at,
+        }
+    }
+
+    fn new_hash(map: HashMap<Vec<u8>, Vec<u8>>, created_at: u64, expiration: Option<u64>) -> Value {
+        let expires_at = expiration.map(|e| created_at + e);
+        Value {
+            value: None,
+            hvalue: Some(map),
             created_at,
             expires_at,
         }
@@ -30,8 +47,17 @@ impl Value {
         false
     }
 
-    fn get_value(&self) -> &Vec<u8> {
+    fn get_value(&self) -> &Option<Vec<u8>> {
         &self.value
+    }
+
+    fn get_hvalue(&self) -> &Option<HashMap<Vec<u8>, Vec<u8>>> {
+        &self.hvalue
+    }
+
+    fn size(&self) -> usize {
+        self.value.as_ref().map(|v|v.len()).unwrap_or(0) +
+            self.hvalue.as_ref().map(|v|calculate_map_size(&v)).unwrap_or(0)
     }
 }
 
@@ -65,6 +91,7 @@ pub enum GetResult {
     NotFound,
     Found,
     Expired,
+    WrongValue
 }
 
 fn calculate_record_size(key_size: usize, value_size: usize) -> usize {
@@ -98,7 +125,7 @@ impl CommonMaps {
 
     pub fn removekey(&mut self, key: &Vec<u8>) -> isize {
         if let Some(value) = self.map.remove(key) {
-            self.current_memory -= calculate_record_size(key.len(), value.value.len());
+            self.current_memory -= calculate_record_size(key.len(), value.size());
             self.remove_from_btree(key, value);
             return 1;
         }
@@ -114,9 +141,47 @@ impl CommonMaps {
             Some(value) => {
                 if value.is_expired(start_time) {
                     Expired
-                } else {
-                    resp_encode_binary_string(value.get_value(), result);
+                } else if let Some(v) = value.get_value() {
+                    resp_encode_binary_string(v, result);
                     Found
+                } else {
+                    WrongValue
+                }
+            }
+            None => NotFound
+        };
+    }
+
+    pub fn hget(&self, key: &Vec<u8>, map_key: &Vec<u8>, result: &mut Vec<u8>, start_time: SystemTime) -> GetResult {
+        return match self.map.get(key) {
+            Some(value) => {
+                if value.is_expired(start_time) {
+                    Expired
+                } else if let Some(v) = value.get_hvalue() {
+                    if let Some(vv) = v.get(map_key) {
+                        resp_encode_binary_string(vv, result);
+                        Found
+                    } else {
+                        NotFound
+                    }
+                } else {
+                    WrongValue
+                }
+            }
+            None => NotFound
+        };
+    }
+
+    pub fn hgetall(&self, key: &Vec<u8>, result: &mut Vec<u8>, start_time: SystemTime) -> GetResult {
+        return match self.map.get(key) {
+            Some(value) => {
+                if value.is_expired(start_time) {
+                    Expired
+                } else if let Some(v) = value.get_hvalue() {
+                    resp_encode_map(v, result);
+                    Found
+                } else {
+                    WrongValue
                 }
             }
             None => NotFound
@@ -159,7 +224,7 @@ impl CommonMaps {
         let created_at = v.created_at;
         let expires_at = v.expires_at;
         if let Some(old) = self.map.insert(key.clone(), v) {
-            self.current_memory = self.current_memory - size + value.len() - old.value.len();
+            self.current_memory = self.current_memory - size + value.len() - old.size();
             self.remove_from_btree(key, old);
         }
         if let Some(ex) = expires_at {
@@ -180,6 +245,14 @@ impl CommonMaps {
                 self.map_by_time.insert(created_at, s);
             }
         };
+    }
+
+    pub fn hset(&mut self, key: &Vec<u8>, values: HashMap<Vec<u8>, Vec<u8>>, start_time: SystemTime) -> Result<(), Error> {
+        todo!()
+    }
+
+    pub fn hdel(&mut self, key: &Vec<u8>, values: HashSet<&Vec<u8>>) -> Result<isize, Error> {
+        todo!()
     }
 
     pub fn size(&self) -> usize {
