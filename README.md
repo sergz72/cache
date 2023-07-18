@@ -10,12 +10,14 @@
   -h host for client to connect (default is 127.0.0.1)<br>
   -b (benchmark mode)<br>
   -r number of requests per thread for benchmark (default is 50000)<br>
-  -m maximum memory for server (default is 1GB)<br>
+  -m maximum memory per database (default is 1GB)<br>
   -t request types for benchmark (possible values - get,set,setpx,ping, default: get,set,get,setpx)<br>
   --nx key expiration in ms for benchmark (default is 100 ms)<br>
   --th number of threads for benchmark (default is 10)<br>
   --km numer of key maps (default 256)<br>
   --hb hash builder type (default sum)<br>
+  --lru (cleanup using lru)<br>
+  --maxdb maximum number of open databases (default 10)<br>
 
 **Only a few Redis commands are implemented:**
 
@@ -28,9 +30,18 @@
 7. flushall
 8. del
 9. dbsize
-10. select db_number (db_number parameter is ignored) - application supports only one db.
-11. config get save -> always returns ""
-12. config get appendonly -> always returns "no"
+10. hset key key1 value1 [key2 value2]...
+11. hget key map_key
+12. hgetall key
+13. hdel key map_key1 [map_key2]...
+14. select db_name - **db_name can be string**.
+15. config get save -> always returns ""
+16. config get appendonly -> always returns "no"
+17. save - saves ONLY CURRENT db to xzipped file with name = database name 
+
+**Non standard commands**
+1. createdb db_name -> creates db if it does not exist, returns an error otherwise
+2. loaddb db_name -> tries to load db from file if required, returns an error if file does not exist
 
 **Application can be started in the following modes:**
 1. Server mode 
