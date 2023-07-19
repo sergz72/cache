@@ -2,13 +2,18 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{Error, ErrorKind};
 use std::sync::{Arc, RwLock};
 use std::time::SystemTime;
-use crate::common_data::build_wrong_data_type_error;
 use crate::common_maps::GetResult::{Expired, Found, NotFound, WrongValue};
+use crate::common_maps::ValueHolder::StringValue;
 use crate::resp_encoder::{resp_encode_binary_string, resp_encode_map};
+use crate::worker_data::build_wrong_data_type_error;
 
+enum ValueHolder {
+    StringValue(Vec<u8>),
+    HashMapValue(HashMap<Vec<u8>, Vec<u8>>),
+    HashSetValue(HashSet<u8>)
+}
 struct Value {
-    value: Option<Vec<u8>>,
-    hvalue: Option<HashMap<Vec<u8>, Vec<u8>>>,
+    value: ValueHolder,
     last_access_time: u64,
     expires_at: Option<u64>,
 }
@@ -21,8 +26,7 @@ impl Value {
     fn new(value: Vec<u8>, created_at: u64, expiration: Option<u64>) -> Value {
         let expires_at = expiration.map(|e| created_at + e);
         Value {
-            value: Some(value),
-            hvalue: None,
+            value: StringValue(value),
             last_access_time: created_at,
             expires_at,
         }
@@ -135,11 +139,13 @@ fn build_out_of_memory_error() -> Error {
 }
 
 impl CommonMaps {
-    pub fn flush(&mut self) {
+    pub fn flush(&mut self) -> usize {
         self.current_memory = 0;
+        let counter = self.map.len();
         self.map.clear();
         self.map_by_expiration.clear();
         self.map_by_time.clear();
+        counter
     }
 
     fn remove_from_btree(&mut self, key: &Vec<u8>, value: Value) {

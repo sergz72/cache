@@ -6,6 +6,7 @@ mod resp_encoder;
 mod benchmark;
 mod common_maps;
 mod hash_builders;
+mod worker_data;
 
 use std::env::args;
 use std::io::{Error, Read, Write};
@@ -165,7 +166,7 @@ fn client_mode(other_arguments: &Vec<String>, port: u16, host: String) -> Result
 }
 
 fn server_mode(verbose: bool, max_memory: usize, port: u16, vector_size: usize, cleanup_using_lru: bool, max_databases: isize,
-               hash_builder: Box<dyn HashBuilder + Sync + Send>) -> Result<(), Error> {
+               hash_builder: Arc<dyn HashBuilder + Sync + Send>) -> Result<(), Error> {
     let common_data = Arc::new(build_common_data(verbose, max_memory, vector_size,
                                                  cleanup_using_lru, max_databases as usize, hash_builder));
     let c = common_data.clone();

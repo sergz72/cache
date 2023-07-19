@@ -1,52 +1,12 @@
-use std::io::{Error, ErrorKind, Read, Write};
+use std::io::{Error, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::ops::DerefMut;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex};
 use std::sync::atomic::Ordering;
 use std::thread;
 use crate::common_data::CommonData;
-use crate::common_maps::CommonMaps;
 use crate::resp_parser::resp_parse;
-
-pub struct WorkerData {
-    pub current_db_name: String,
-    pub current_db: Arc<Vec<RwLock<CommonMaps>>>
-}
-
-fn parse_db_name(db_name: Vec<u8>) -> Result<String, Error> {
-    String::from_utf8(db_name).map_err(|_|Error::new(ErrorKind::InvalidData, "-invalid database name\r\n"))
-}
-
-impl WorkerData {
-    pub fn new(db_name: Vec<u8>, common_data: Arc<CommonData>) -> Result<WorkerData, Error> {
-        let current_db_name = parse_db_name(db_name)?;
-        let db_name_clone = current_db_name.clone();
-        Ok(WorkerData{ current_db_name, current_db: common_data.select(db_name_clone) })
-    }
-
-    pub fn select(&mut self, db_name: Vec<u8>, common_data: Arc<CommonData>) -> Result<(), Error> {
-        let current_db_name = parse_db_name(db_name)?;
-        self.current_db_name = current_db_name.clone();
-        self.current_db = common_data.select(current_db_name);
-        Ok(())
-    }
-
-    pub fn createdb(&mut self, db_name: Vec<u8>, common_data: Arc<CommonData>) -> Result<(), Error> {
-        let current_db_name = parse_db_name(db_name)?;
-        let current_db = common_data.createdb(current_db_name.clone())?;
-        self.current_db_name = current_db_name;
-        self.current_db = current_db;
-        Ok(())
-    }
-
-    pub fn loaddb(&mut self, db_name: Vec<u8>, common_data: Arc<CommonData>) -> Result<(), Error> {
-        let current_db_name = parse_db_name(db_name)?;
-        let current_db = common_data.loaddb(current_db_name.clone())?;
-        self.current_db_name = current_db_name;
-        self.current_db = current_db;
-        Ok(())
-    }
-}
+use crate::worker_data::WorkerData;
 
 pub fn work_handler<'a>(idx: usize, stream: Arc<Mutex<TcpStream>>, common_data: Arc<CommonData>) {
     let mut buffer = [0; 1000000];

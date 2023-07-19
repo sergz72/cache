@@ -2,22 +2,21 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::collections::hash_map::Entry;
 use std::io::{Error, ErrorKind};
 use std::net::TcpStream;
-use std::sync::{Arc, Mutex, RwLock};
-use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::SystemTime;
-use crate::common_maps;
 use crate::common_maps::{build_maps, CommonMaps, load_maps};
 use crate::hash_builders::HashBuilder;
-use crate::server::WorkerData;
 
-struct CommonDataMap {
+pub struct CommonDataMap {
     map: Vec<RwLock<CommonMaps>>,
-    last_access_time: u64
+    last_access_time: AtomicU64,
+    is_updated: AtomicBool
 }
 
 pub struct CommonData {
-    start_time: SystemTime,
-    hash_builder: Box<dyn HashBuilder + Send + Sync>,
+    pub start_time: SystemTime,
+    pub hash_builder: Arc<dyn HashBuilder + Send + Sync>,
     pub verbose: bool,
     pub configuration: HashMap<Vec<u8>, Vec<u8>>,
     maps_map: RwLock<HashMap<String, Arc<CommonDataMap>>>,
@@ -30,8 +29,25 @@ pub struct CommonData {
     map_by_time: RwLock<BTreeMap<u64, HashSet<String>>>,
 }
 
-pub fn build_wrong_data_type_error() -> Error {
-    Error::new(ErrorKind::InvalidData, "-Operation against a key holding the wrong kind of value\r\n")
+impl CommonDataMap {
+    pub fn flush(&self) {
+        let deleted: usize = self.map.iter().map(|m|m.write().unwrap().flush()).sum();
+        if deleted != 0 {
+            self.is_updated.store(true, Ordering::Relaxed);
+        }
+    }
+
+    pub fn get_read_lock(&self, idx: usize) -> RwLockReadGuard<CommonMaps> {
+        self.map[idx].read().unwrap()
+    }
+
+    pub fn get_write_lock(&self, idx: usize) -> RwLockWriteGuard<CommonMaps> {
+        self.map[idx].write().unwrap()
+    }
+
+    pub fn size(&self) -> usize {
+        self.map.iter().map(|m|m.read().unwrap().size()).sum()
+    }
 }
 
 impl CommonData {
@@ -79,93 +95,7 @@ impl CommonData {
 
     pub fn flush_all(&self) {
         self.maps_map.read().unwrap().values()
-            .for_each(|db|db.iter().for_each(|m|m.write().unwrap().flush()))
-    }
-
-    pub fn flush(worker_data: &WorkerData) {
-        worker_data.current_db.iter().for_each(|m|m.write().unwrap().flush());
-    }
-
-    pub fn removekeys(&self, keys: HashSet<&Vec<u8>>, worker_data: &WorkerData) -> isize {
-            let mut key_map: HashMap<usize, Vec<&Vec<u8>>> = HashMap::new();
-        for key in keys {
-            let hash = self.hash_builder.build_hash(key);
-            match key_map.get_mut(&hash) {
-                Some(v) => v.push(key),
-                None => {
-                    let mut s = Vec::new();
-                    s.push(key);
-                    key_map.insert(hash, s);
-                }
-            }
-        }
-        key_map.into_iter()
-            .map(|(idx, keys)|worker_data.current_db[idx].write().unwrap().removekeys(keys))
-            .sum()
-    }
-
-    pub fn hdel(&self, key: &Vec<u8>, keys: HashSet<&Vec<u8>>, worker_data: &WorkerData) -> Result<isize, Error> {
-        let idx = self.hash_builder.build_hash(key);
-        worker_data.current_db[idx].write().unwrap().hdel(key, keys)
-    }
-
-    pub fn set(&self, key: &Vec<u8>, value: &Vec<u8>, expiry: Option<u64>, worker_data: &WorkerData) -> Result<(), Error> {
-        let idx = self.hash_builder.build_hash(key);
-        worker_data.current_db[idx].write().unwrap().set(key, value, expiry, self.start_time)
-    }
-
-    pub fn hset(&self, key: &Vec<u8>, values: HashMap<Vec<u8>, Vec<u8>>, worker_data: &WorkerData) -> Result<isize, Error> {
-        let idx = self.hash_builder.build_hash(key);
-        worker_data.current_db[idx].write().unwrap().hset(key, values, self.start_time)
-    }
-
-    pub fn get(&self, key: &Vec<u8>, result: &mut Vec<u8>, worker_data: &WorkerData) -> Result<bool, Error> {
-        let idx = self.hash_builder.build_hash(key);
-        let lock = worker_data.current_db[idx].read().unwrap();
-        match lock.get(key, result, self.start_time) {
-            common_maps::GetResult::Found => Ok(true),
-            common_maps::GetResult::NotFound => Ok(false),
-            common_maps::GetResult::WrongValue => Err(build_wrong_data_type_error()),
-            common_maps::GetResult::Expired => {
-                drop(lock);
-                worker_data.current_db[idx].write().unwrap().removekey(key);
-                Ok(false)
-            }
-        }
-    }
-
-    pub fn hget(&self, key: &Vec<u8>, map_key: &Vec<u8>, result: &mut Vec<u8>, worker_data: &WorkerData) -> Result<bool, Error> {
-        let idx = self.hash_builder.build_hash(key);
-        let lock = worker_data.current_db[idx].read().unwrap();
-        match lock.hget(key, map_key, result, self.start_time) {
-            common_maps::GetResult::Found => Ok(true),
-            common_maps::GetResult::NotFound => Ok(false),
-            common_maps::GetResult::WrongValue => Err(build_wrong_data_type_error()),
-            common_maps::GetResult::Expired => {
-                drop(lock);
-                worker_data.current_db[idx].write().unwrap().removekey(key);
-                Ok(false)
-            }
-        }
-    }
-
-    pub fn hgetall(&self, key: &Vec<u8>, result: &mut Vec<u8>, worker_data: &WorkerData) -> Result<bool, Error> {
-        let idx = self.hash_builder.build_hash(key);
-        let lock = worker_data.current_db[idx].read().unwrap();
-        match lock.hgetall(key, result, self.start_time) {
-            common_maps::GetResult::Found => Ok(true),
-            common_maps::GetResult::NotFound => Ok(false),
-            common_maps::GetResult::WrongValue => Err(build_wrong_data_type_error()),
-            common_maps::GetResult::Expired => {
-                drop(lock);
-                worker_data.current_db[idx].write().unwrap().removekey(key);
-                Ok(false)
-            }
-        }
-    }
-
-    pub fn size(worker_data: &WorkerData) -> usize {
-        worker_data.current_db.iter().map(|m|m.read().unwrap().size()).sum()
+            .for_each(|db|db.flush())
     }
 }
 
@@ -176,7 +106,7 @@ fn build_configuration() -> HashMap<Vec<u8>, Vec<u8>> {
 }
 
 pub fn build_common_data(verbose: bool, max_memory: usize, vector_size: usize, cleanup_using_lru: bool,
-                         max_open_databases: usize, hash_builder: Box<dyn HashBuilder + Send + Sync>) -> CommonData {
+                         max_open_databases: usize, hash_builder: Arc<dyn HashBuilder + Send + Sync>) -> CommonData {
     CommonData {
         start_time: SystemTime::now(),
         hash_builder,
@@ -189,6 +119,6 @@ pub fn build_common_data(verbose: bool, max_memory: usize, vector_size: usize, c
         vector_size,
         cleanup_using_lru,
         max_open_databases,
-        map_by_time: BTreeMap::new()
+        map_by_time: RwLock::new(BTreeMap::new())
     }
 }

@@ -1,4 +1,5 @@
 use std::io::{Error, ErrorKind};
+use std::sync::Arc;
 
 pub trait HashBuilder {
     fn build_hash(&self, key: &Vec<u8>) -> usize;
@@ -136,23 +137,23 @@ impl HashBuilder for ZeroHashBuilder {
     }
 }
 
-pub fn create_hash_builder(name: String, max_value: usize) -> Result<Box<dyn HashBuilder + Send + Sync>, Error> {
+pub fn create_hash_builder(name: String, max_value: usize) -> Result<Arc<dyn HashBuilder + Send + Sync>, Error> {
     if max_value == 1 {
-        return Ok(Box::new(ZeroHashBuilder::new()))
+        return Ok(Arc::new(ZeroHashBuilder::new()))
     }
     match name.as_str() {
         "xor" => {
             if max_value < 256 {
-                Ok(Box::new(XorHashBuilder::new(max_value as u8)))
+                Ok(Arc::new(XorHashBuilder::new(max_value as u8)))
             } else if max_value == 256 {
-                Ok(Box::new(XorHashBuilder256::new()))
+                Ok(Arc::new(XorHashBuilder256::new()))
             } else {
                 Err(Error::new(ErrorKind::InvalidInput, "xor hash builder supports only max_value <= 256"))
             }
         },
-        "sum" => Ok(Box::new(SumHashBuilder::new(max_value))),
-        "djb2" => Ok(Box::new(DJB2HashBuilder::new(max_value))),
-        "sdbm" => Ok(Box::new(SDBMHashBuilder::new(max_value))),
+        "sum" => Ok(Arc::new(SumHashBuilder::new(max_value))),
+        "djb2" => Ok(Arc::new(DJB2HashBuilder::new(max_value))),
+        "sdbm" => Ok(Arc::new(SDBMHashBuilder::new(max_value))),
         _ => Err(Error::new(ErrorKind::InvalidInput, "invalid hash builder type"))
     }
 }

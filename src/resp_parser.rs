@@ -2,7 +2,7 @@ use std::sync::Arc;
 use crate::resp_commands::{run_config_command, run_createdb_command, run_dbsize_command, run_del_command, run_flush_command, run_flushall_command, run_get_command, run_hdel_command, run_hget_command, run_hgetall_command, run_hset_command, run_loaddb_command, run_ping_command, run_save_command, run_select_command, run_set_command};
 use crate::resp_parser::RespToken::{RespArray, RespBinaryString, RespInteger, RespNullArray, RespNullString, RespString};
 use crate::common_data::CommonData;
-use crate::server::WorkerData;
+use crate::worker_data::WorkerData;
 
 pub trait RespCommand {
     fn run(&self, common_data: Arc<CommonData>) -> Vec<u8>;
