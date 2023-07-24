@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::io::{Error, ErrorKind};
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 use std::time::SystemTime;
 use crate::common_data::CommonData;
 use crate::common_data_map::CommonDataMap;
@@ -10,7 +11,7 @@ use crate::hash_builders::HashBuilder;
 use crate::value::ValueHolder;
 
 pub struct WorkerData {
-    current_db_name: String,
+    pub current_db_name: String,
     current_db: Arc<CommonDataMap>,
     start_time: SystemTime,
     hash_builder: Arc<dyn HashBuilder + Send + Sync>,
@@ -53,7 +54,7 @@ impl WorkerData {
 
     pub fn hgetall(&self, key: &Vec<u8>, result: &mut Vec<u8>) -> Result<bool, Error> {
         let idx = self.hash_builder.build_hash(key);
-        let mut lock = self.current_db.get_write_lock(idx);
+        let lock = self.current_db.get_read_lock(idx);
         match lock.hgetall(key, result, self.start_time) {
             common_maps::GetResult::Found => Ok(true),
             common_maps::GetResult::NotFound => Ok(false),
@@ -72,7 +73,7 @@ impl WorkerData {
 
     pub fn get(&self, key: &Vec<u8>, result: &mut Vec<u8>) -> Result<bool, Error> {
         let idx = self.hash_builder.build_hash(key);
-        let mut lock = self.current_db.get_write_lock(idx);
+        let lock = self.current_db.get_read_lock(idx);
         match lock.get(key, result, self.start_time) {
             common_maps::GetResult::Found => Ok(true),
             common_maps::GetResult::NotFound => Ok(false),
@@ -102,7 +103,7 @@ impl WorkerData {
 
     pub fn hget(&self, key: &Vec<u8>, map_key: &Vec<u8>, result: &mut Vec<u8>) -> Result<bool, Error> {
         let idx = self.hash_builder.build_hash(key);
-        let mut lock = self.current_db.get_write_lock(idx);
+        let lock = self.current_db.get_read_lock(idx);
         match lock.hget(key, map_key, result, self.start_time) {
             common_maps::GetResult::Found => Ok(true),
             common_maps::GetResult::NotFound => Ok(false),
@@ -135,5 +136,9 @@ impl WorkerData {
         key_map.into_iter()
             .map(|(idx, keys)|self.current_db.get_write_lock(idx).removekeys(keys))
             .sum()
+    }
+
+    pub fn get_last_access_time(&self) -> &AtomicU64 {
+        &self.current_db.last_access_time
     }
 }

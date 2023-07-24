@@ -6,7 +6,7 @@ use crate::common_maps::{build_map, CommonMaps};
 
 pub struct CommonDataMap {
     map: Vec<RwLock<CommonMaps>>,
-    last_access_time: AtomicU64,
+    pub last_access_time: AtomicU64,
     is_updated: AtomicBool
 }
 

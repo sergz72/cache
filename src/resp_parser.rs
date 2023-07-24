@@ -77,12 +77,12 @@ fn run_command(token: RespToken, result: &mut Vec<u8>, common_data: Arc<CommonDa
                                 'd' | 'D' => {
                                     match s.len() {
                                         3 => if check_name(s, 1, "el") {
-                                            run_del_command(v, result, worker_data);
+                                            run_del_command(v, result, common_data, worker_data);
                                         } else {
                                             result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
                                         },
                                         6 => if check_name(s, 1, "bsize") {
-                                            run_dbsize_command(result, worker_data);
+                                            run_dbsize_command(result, common_data, worker_data);
                                         } else {
                                             result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
                                         },
@@ -93,7 +93,7 @@ fn run_command(token: RespToken, result: &mut Vec<u8>, common_data: Arc<CommonDa
                                     match s.len() {
                                         7 => {
                                             if check_name(s, 1, "lushdb") {
-                                                run_flush_command(result, worker_data);
+                                                run_flush_command(result, common_data, worker_data);
                                             } else {
                                                 result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
                                             }
@@ -110,7 +110,7 @@ fn run_command(token: RespToken, result: &mut Vec<u8>, common_data: Arc<CommonDa
                                 }
                                 'g' | 'G' => {
                                     if check_name(s, 1, "et") {
-                                        run_get_command(v, result, worker_data);
+                                        run_get_command(v, result, common_data, worker_data);
                                     } else {
                                         result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
                                     }
@@ -119,24 +119,24 @@ fn run_command(token: RespToken, result: &mut Vec<u8>, common_data: Arc<CommonDa
                                     match s.len() {
                                         4 => match s[1] as char {
                                             'g' | 'G' => if check_name(s, 2, "et") {
-                                                run_hget_command(v, result, worker_data);
+                                                run_hget_command(v, result, common_data, worker_data);
                                             } else {
                                                 result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
                                             },
                                             's' | 'S' => if check_name(s, 2, "et") {
-                                                run_hset_command(v, result, worker_data);
+                                                run_hset_command(v, result, common_data, worker_data);
                                             } else {
                                                 result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
                                             },
                                             'd' | 'D' => if check_name(s, 2, "el") {
-                                                run_hdel_command(v, result, worker_data);
+                                                run_hdel_command(v, result, common_data, worker_data);
                                             } else {
                                                 result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
                                             },
                                             _ => result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes())
                                         },
                                         7 => if check_name(s, 1, "getall") {
-                                            run_hgetall_command(v, result, worker_data);
+                                            run_hgetall_command(v, result, common_data, worker_data);
                                         } else {
                                             result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
                                         },
@@ -145,7 +145,7 @@ fn run_command(token: RespToken, result: &mut Vec<u8>, common_data: Arc<CommonDa
                                 }
                                 'k' | 'K' => {
                                     if check_name(s, 1, "eys") {
-                                        run_keys_command(v, result, worker_data);
+                                        run_keys_command(v, result, common_data, worker_data);
                                     } else {
                                         result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
                                     }
@@ -167,7 +167,7 @@ fn run_command(token: RespToken, result: &mut Vec<u8>, common_data: Arc<CommonDa
                                 's' | 'S' => {
                                     match s.len() {
                                         3 => if check_name(s, 1, "et") {
-                                            run_set_command(v, result, worker_data);
+                                            run_set_command(v, result, common_data, worker_data);
                                         } else {
                                             result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
                                         },
@@ -177,7 +177,7 @@ fn run_command(token: RespToken, result: &mut Vec<u8>, common_data: Arc<CommonDa
                                                     match s[2] as char {
                                                         'd'|'D' => {
                                                             match s[3] as char {
-                                                              'd'|'D' => run_sadd_command(v, result, worker_data),
+                                                              'd'|'D' => run_sadd_command(v, result, common_data, worker_data),
                                                                _ => result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes())
                                                             }
                                                         },
@@ -191,12 +191,12 @@ fn run_command(token: RespToken, result: &mut Vec<u8>, common_data: Arc<CommonDa
                                                     }
                                                 },
                                                 'm'|'M' => if check_name(s, 1, "embers") {
-                                                    run_smembers_command(v, result, worker_data);
+                                                    run_smembers_command(v, result, common_data, worker_data);
                                                 } else {
                                                     result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
                                                 },
                                                 'r'|'R' => if check_name(s, 1, "em") {
-                                                    run_srem_command(v, result, worker_data);
+                                                    run_srem_command(v, result, common_data, worker_data);
                                                 } else {
                                                     result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
                                                 },

@@ -62,8 +62,9 @@ pub fn run_loaddb_command(v: Vec<RespToken>, result: &mut Vec<u8>, common_data: 
     result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
 }
 
-pub fn run_flush_command(result: &mut Vec<u8>, worker_data: &WorkerData) {
+pub fn run_flush_command(result: &mut Vec<u8>, common_data: Arc<CommonData>, worker_data: &WorkerData) {
     worker_data.flush();
+    common_data.move_to_top(&worker_data.current_db_name, &worker_data.get_last_access_time());
     result.extend_from_slice(OK);
 }
 
@@ -72,11 +73,12 @@ pub fn run_flushall_command(result: &mut Vec<u8>, common_data: Arc<CommonData>) 
     result.extend_from_slice(OK);
 }
 
-pub fn run_dbsize_command(result: &mut Vec<u8>, worker_data: &WorkerData) {
+pub fn run_dbsize_command(result: &mut Vec<u8>, common_data: Arc<CommonData>, worker_data: &WorkerData) {
+    common_data.move_to_top(&worker_data.current_db_name, &worker_data.get_last_access_time());
     resp_encode_int(worker_data.size() as isize, result)
 }
 
-pub fn run_del_command(v: Vec<RespToken>, result: &mut Vec<u8>, worker_data: &WorkerData) {
+pub fn run_del_command(v: Vec<RespToken>, result: &mut Vec<u8>, common_data: Arc<CommonData>, worker_data: &WorkerData) {
     if v.len() >= 2 {
         let mut keys = HashSet::new();
         for i in 1..v.len() {
@@ -88,13 +90,14 @@ pub fn run_del_command(v: Vec<RespToken>, result: &mut Vec<u8>, worker_data: &Wo
             }
         }
         let removed = worker_data.removekeys(keys);
+        common_data.move_to_top(&worker_data.current_db_name, &worker_data.get_last_access_time());
         resp_encode_int(removed, result);
         return;
     }
     result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
 }
 
-pub fn run_hdel_command(v: Vec<RespToken>, result: &mut Vec<u8>, worker_data: &WorkerData) {
+pub fn run_hdel_command(v: Vec<RespToken>, result: &mut Vec<u8>, common_data: Arc<CommonData>, worker_data: &WorkerData) {
     if v.len() >= 3 {
         if let RespBinaryString(key) = &v[1] {
             let mut keys = HashSet::new();
@@ -107,7 +110,10 @@ pub fn run_hdel_command(v: Vec<RespToken>, result: &mut Vec<u8>, worker_data: &W
                 }
             }
             match worker_data.hdel(key, keys) {
-                Ok(removed) => resp_encode_int(removed, result),
+                Ok(removed) => {
+                    resp_encode_int(removed, result);
+                    common_data.move_to_top(&worker_data.current_db_name, &worker_data.get_last_access_time());
+                },
                 Err(e) => result.extend_from_slice(e.to_string().as_bytes())
             }
             return;
@@ -116,11 +122,12 @@ pub fn run_hdel_command(v: Vec<RespToken>, result: &mut Vec<u8>, worker_data: &W
     result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
 }
 
-pub fn run_get_command(v: Vec<RespToken>, result: &mut Vec<u8>, worker_data: &WorkerData) {
+pub fn run_get_command(v: Vec<RespToken>, result: &mut Vec<u8>, common_data: Arc<CommonData>, worker_data: &WorkerData) {
     if v.len() == 2 {
         if let RespBinaryString(key) = &v[1] {
             match worker_data.get(key, result) {
                 Ok(b) => {
+                    common_data.move_to_top(&worker_data.current_db_name, &worker_data.get_last_access_time());
                     if !b {
                         result.extend_from_slice(NULL_STRING);
                     }
@@ -133,11 +140,12 @@ pub fn run_get_command(v: Vec<RespToken>, result: &mut Vec<u8>, worker_data: &Wo
     result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
 }
 
-pub fn run_hgetall_command(v: Vec<RespToken>, result: &mut Vec<u8>, worker_data: &WorkerData) {
+pub fn run_hgetall_command(v: Vec<RespToken>, result: &mut Vec<u8>, common_data: Arc<CommonData>, worker_data: &WorkerData) {
     if v.len() == 2 {
         if let RespBinaryString(key) = &v[1] {
             match worker_data.hgetall(key, result) {
                 Ok(b) => {
+                    common_data.move_to_top(&worker_data.current_db_name, &worker_data.get_last_access_time());
                     if !b {
                         result.extend_from_slice(NULL_STRING);
                     }
@@ -150,12 +158,13 @@ pub fn run_hgetall_command(v: Vec<RespToken>, result: &mut Vec<u8>, worker_data:
     result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
 }
 
-pub fn run_hget_command(v: Vec<RespToken>, result: &mut Vec<u8>, worker_data: &WorkerData) {
+pub fn run_hget_command(v: Vec<RespToken>, result: &mut Vec<u8>, common_data: Arc<CommonData>, worker_data: &WorkerData) {
     if v.len() == 3 {
         if let RespBinaryString(key) = &v[1] {
             if let RespBinaryString(map_key) = &v[2] {
                 match worker_data.hget(key, map_key, result) {
                     Ok(b) => {
+                        common_data.move_to_top(&worker_data.current_db_name, &worker_data.get_last_access_time());
                         if !b {
                             result.extend_from_slice(NULL_STRING);
                         }
@@ -169,12 +178,15 @@ pub fn run_hget_command(v: Vec<RespToken>, result: &mut Vec<u8>, worker_data: &W
     result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
 }
 
-fn set_with_result(k: &Vec<u8>, vv: ValueHolder, e: isize, result: &mut Vec<u8>, worker_data: &WorkerData) {
+fn set_with_result(k: &Vec<u8>, vv: ValueHolder, e: isize, result: &mut Vec<u8>, common_data: Arc<CommonData>, worker_data: &WorkerData) {
     if e <= 0 {
         result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
     } else {
         match worker_data.set(k, vv, Some(e as u64)) {
-            Ok(()) => result.extend_from_slice(OK),
+            Ok(()) => {
+                common_data.move_to_top(&worker_data.current_db_name, &worker_data.get_last_access_time());
+                result.extend_from_slice(OK);
+            },
             Err(e) => result.extend_from_slice(e.to_string().as_bytes())
         }
     }
@@ -193,7 +205,7 @@ fn parse_number_from_vec(v: &Vec<u8>) -> Option<isize> {
     Some(result)
 }
 
-pub fn run_set_command(v: Vec<RespToken>, result: &mut Vec<u8>, worker_data: &WorkerData) {
+pub fn run_set_command(v: Vec<RespToken>, result: &mut Vec<u8>, common_data: Arc<CommonData>, worker_data: &WorkerData) {
     let l = v.len();
     if l >= 3 {
         if let RespBinaryString(k) = &v[1] {
@@ -207,7 +219,10 @@ pub fn run_set_command(v: Vec<RespToken>, result: &mut Vec<u8>, worker_data: &Wo
             };
                 if l == 3 {
                     match worker_data.set(k, value, None) {
-                        Ok(()) => result.extend_from_slice(OK),
+                        Ok(()) => {
+                            common_data.move_to_top(&worker_data.current_db_name, &worker_data.get_last_access_time());
+                            result.extend_from_slice(OK);
+                        },
                         Err(e) => result.extend_from_slice(e.to_string().as_bytes())
                     }
                     return;
@@ -220,11 +235,11 @@ pub fn run_set_command(v: Vec<RespToken>, result: &mut Vec<u8>, worker_data: &Wo
                                     'e' | 'E' => {
                                         match &v[4] {
                                             RespInteger(ex) => {
-                                                set_with_result(k, value, *ex * 1000, result, worker_data);
+                                                set_with_result(k, value, *ex * 1000, result, common_data, worker_data);
                                             }
                                             RespBinaryString(v) => {
                                                 if let Some(ex) = parse_number_from_vec(v) {
-                                                    set_with_result(k, value, ex * 1000, result, worker_data);
+                                                    set_with_result(k, value, ex * 1000, result, common_data, worker_data);
                                                 } else {
                                                     result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
                                                 }
@@ -236,11 +251,11 @@ pub fn run_set_command(v: Vec<RespToken>, result: &mut Vec<u8>, worker_data: &Wo
                                     'p'|'P' => {
                                         match &v[4] {
                                             RespInteger(ex) => {
-                                                set_with_result(k, value, *ex, result, worker_data);
+                                                set_with_result(k, value, *ex, result, common_data, worker_data);
                                             }
                                             RespBinaryString(v) => {
                                                 if let Some(ex) = parse_number_from_vec(v) {
-                                                    set_with_result(k, value, ex, result, worker_data);
+                                                    set_with_result(k, value, ex, result, common_data, worker_data);
                                                 } else {
                                                     result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
                                                 }
@@ -263,7 +278,7 @@ pub fn run_set_command(v: Vec<RespToken>, result: &mut Vec<u8>, worker_data: &Wo
     result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
 }
 
-pub fn run_hset_command(v: Vec<RespToken>, result: &mut Vec<u8>, worker_data: &WorkerData) {
+pub fn run_hset_command(v: Vec<RespToken>, result: &mut Vec<u8>, common_data: Arc<CommonData>, worker_data: &WorkerData) {
     let l = v.len();
     if l >= 4 && ((l & 1) == 0) {
         if let RespBinaryString(key) = &v[1] {
@@ -276,7 +291,10 @@ pub fn run_hset_command(v: Vec<RespToken>, result: &mut Vec<u8>, worker_data: &W
                 }
             }
             match worker_data.hset(key, values) {
-                Ok(count) => resp_encode_int(count, result),
+                Ok(count) => {
+                    common_data.move_to_top(&worker_data.current_db_name, &worker_data.get_last_access_time());
+                    resp_encode_int(count, result);
+                },
                 Err(e) => result.extend_from_slice(e.to_string().as_bytes())
             }
             return;
@@ -285,19 +303,19 @@ pub fn run_hset_command(v: Vec<RespToken>, result: &mut Vec<u8>, worker_data: &W
     result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
 }
 
-pub fn run_keys_command(v: Vec<RespToken>, result: &mut Vec<u8>, worker_data: &WorkerData) {
+pub fn run_keys_command(v: Vec<RespToken>, result: &mut Vec<u8>, common_data: Arc<CommonData>, worker_data: &WorkerData) {
     result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
 }
 
-pub fn run_sadd_command(v: Vec<RespToken>, result: &mut Vec<u8>, worker_data: &WorkerData) {
+pub fn run_sadd_command(v: Vec<RespToken>, result: &mut Vec<u8>, common_data: Arc<CommonData>, worker_data: &WorkerData) {
     result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
 }
 
-pub fn run_srem_command(v: Vec<RespToken>, result: &mut Vec<u8>, worker_data: &WorkerData) {
+pub fn run_srem_command(v: Vec<RespToken>, result: &mut Vec<u8>, common_data: Arc<CommonData>, worker_data: &WorkerData) {
     result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
 }
 
-pub fn run_smembers_command(v: Vec<RespToken>, result: &mut Vec<u8>, worker_data: &WorkerData) {
+pub fn run_smembers_command(v: Vec<RespToken>, result: &mut Vec<u8>, common_data: Arc<CommonData>, worker_data: &WorkerData) {
     result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
 }
 

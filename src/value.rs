@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::io::Error;
+use std::sync::atomic::AtomicU64;
 use std::time::SystemTime;
 use crate::errors::build_wrong_data_type_error;
 use crate::value::ValueHolder::{HashMapValue, HashSetValue, IntValue, StringValue};
@@ -32,7 +33,7 @@ impl ValueHolder {
 
 pub struct Value {
     value: ValueHolder,
-    pub last_access_time: u64,
+    pub last_access_time: AtomicU64,
     pub expires_at: Option<u64>,
 }
 
@@ -41,7 +42,7 @@ impl Value {
         let expires_at = expiration.map(|e| created_at + e);
         Value {
             value,
-            last_access_time: created_at,
+            last_access_time: AtomicU64::new(created_at),
             expires_at,
         }
     }
@@ -49,7 +50,7 @@ impl Value {
     pub fn new_hash(map: HashMap<Vec<u8>, Vec<u8>>, created_at: u64) -> Value {
         Value {
             value: HashMapValue(map),
-            last_access_time: created_at,
+            last_access_time: AtomicU64::new(created_at),
             expires_at: None,
         }
     }
@@ -57,7 +58,7 @@ impl Value {
     pub fn new_set(set: HashSet<Vec<u8>>, created_at: u64) -> Value {
         Value {
             value: HashSetValue(set),
-            last_access_time: created_at,
+            last_access_time: AtomicU64::new(created_at),
             expires_at: None,
         }
     }

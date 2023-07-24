@@ -3,7 +3,7 @@ use std::collections::hash_map::Entry;
 use std::io::{Error, ErrorKind};
 use std::net::TcpStream;
 use std::sync::{Arc, Mutex, RwLock};
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::SystemTime;
 use crate::common_data_map::CommonDataMap;
 use crate::hash_builders::HashBuilder;
@@ -34,14 +34,31 @@ impl CommonData {
         self.map_by_time.write().unwrap().entry(now).or_insert(HashSet::new()).insert(db_name);
     }
 
-    fn move_to_top(&self, db_name: String) {
+    pub fn move_to_top(&self, db_name: &String, last_access_time: &AtomicU64) {
         let now = SystemTime::now().duration_since(self.start_time).unwrap().as_millis() as u64;
+        let old = last_access_time.swap(now, Ordering::Relaxed);
+        if old != now {
+            let mut lock= self.map_by_time.write().unwrap();
+            lock.get_mut(&old).unwrap().remove(db_name);
+            lock.entry(now).or_insert(HashSet::new()).insert(db_name.clone());
+        }
+    }
+
+    fn cleanup(&self) {
+        while self.maps_map.read().unwrap().len() >= self.max_open_databases {
+            let lock = self.map_by_time.write().unwrap();
+            let (k, v) = lock.first_key_value().unwrap();
+            for db_name in v {
+                todo!()
+            }
+        }
     }
 
     pub fn createdb(&self, db_name: String) -> Result<Arc<CommonDataMap>, Error> {
         match self.maps_map.write().unwrap().entry(db_name.clone()) {
             Entry::Occupied(_) => Err(Error::new(ErrorKind::AlreadyExists, "-database already exists\r\n")),
             Entry::Vacant(e) => {
+                self.cleanup();
                 let maps = CommonDataMap::new(self.vector_size,
                                               self.max_memory, self.cleanup_using_lru, self.start_time);
                 e.insert(maps.clone());
@@ -56,6 +73,7 @@ impl CommonData {
         match self.maps_map.write().unwrap().entry(db_name.clone()) {
             Entry::Occupied(e) => Ok(e.get().clone()),
             Entry::Vacant(e) => {
+                self.cleanup();
                 let maps = CommonDataMap::load(db_name_clone, self.vector_size, self.max_memory, self.cleanup_using_lru)?;
                 e.insert(maps.clone());
                 self.insert_to_map_by_time(db_name);
@@ -65,8 +83,8 @@ impl CommonData {
     }
 
     pub fn flush_all(&self) {
-        self.maps_map.read().unwrap().values()
-            .for_each(|db|db.flush())
+        self.maps_map.read().unwrap().iter()
+            .for_each(|(db_name, db)|{db.flush();self.move_to_top(db_name, &db.last_access_time);})
     }
 }
 
