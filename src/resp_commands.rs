@@ -74,7 +74,7 @@ pub fn run_dbsize_command(result: &mut Vec<u8>, worker_data: &WorkerData) {
     resp_encode_int(worker_data.size() as isize, result)
 }
 
-pub fn run_del_command(v: Vec<RespToken>, result: &mut Vec<u8>, common_data: Arc<CommonData>, worker_data: &WorkerData) {
+pub fn run_del_command(v: Vec<RespToken>, result: &mut Vec<u8>, worker_data: &WorkerData) {
     if v.len() >= 2 {
         let mut keys = HashSet::new();
         for i in 1..v.len() {
@@ -92,7 +92,7 @@ pub fn run_del_command(v: Vec<RespToken>, result: &mut Vec<u8>, common_data: Arc
     result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
 }
 
-pub fn run_hdel_command(v: Vec<RespToken>, result: &mut Vec<u8>, common_data: Arc<CommonData>, worker_data: &WorkerData) {
+pub fn run_hdel_command(v: Vec<RespToken>, result: &mut Vec<u8>, worker_data: &WorkerData) {
     if v.len() >= 3 {
         if let RespBinaryString(key) = &v[1] {
             let mut keys = HashSet::new();
@@ -114,7 +114,7 @@ pub fn run_hdel_command(v: Vec<RespToken>, result: &mut Vec<u8>, common_data: Ar
     result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
 }
 
-pub fn run_get_command(v: Vec<RespToken>, result: &mut Vec<u8>, common_data: Arc<CommonData>, worker_data: &WorkerData) {
+pub fn run_get_command(v: Vec<RespToken>, result: &mut Vec<u8>, worker_data: &WorkerData) {
     if v.len() == 2 {
         if let RespBinaryString(key) = &v[1] {
             match worker_data.get(key, result) {
@@ -131,7 +131,7 @@ pub fn run_get_command(v: Vec<RespToken>, result: &mut Vec<u8>, common_data: Arc
     result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
 }
 
-pub fn run_hgetall_command(v: Vec<RespToken>, result: &mut Vec<u8>, common_data: Arc<CommonData>, worker_data: &WorkerData) {
+pub fn run_hgetall_command(v: Vec<RespToken>, result: &mut Vec<u8>, worker_data: &WorkerData) {
     if v.len() == 2 {
         if let RespBinaryString(key) = &v[1] {
             match worker_data.hgetall(key, result) {
@@ -148,7 +148,7 @@ pub fn run_hgetall_command(v: Vec<RespToken>, result: &mut Vec<u8>, common_data:
     result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
 }
 
-pub fn run_hget_command(v: Vec<RespToken>, result: &mut Vec<u8>, common_data: Arc<CommonData>, worker_data: &WorkerData) {
+pub fn run_hget_command(v: Vec<RespToken>, result: &mut Vec<u8>, worker_data: &WorkerData) {
     if v.len() == 3 {
         if let RespBinaryString(key) = &v[1] {
             if let RespBinaryString(map_key) = &v[2] {
@@ -167,7 +167,7 @@ pub fn run_hget_command(v: Vec<RespToken>, result: &mut Vec<u8>, common_data: Ar
     result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
 }
 
-fn set_with_result(k: &Vec<u8>, vv: &Vec<u8>, e: isize, result: &mut Vec<u8>, common_data: Arc<CommonData>, worker_data: &WorkerData) {
+fn set_with_result(k: &Vec<u8>, vv: &Vec<u8>, e: isize, result: &mut Vec<u8>, worker_data: &WorkerData) {
     if e <= 0 {
         result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
     } else {
@@ -191,7 +191,7 @@ fn parse_number_from_vec(v: &Vec<u8>) -> Option<isize> {
     Some(result)
 }
 
-pub fn run_set_command(v: Vec<RespToken>, result: &mut Vec<u8>, common_data: Arc<CommonData>, worker_data: &WorkerData) {
+pub fn run_set_command(v: Vec<RespToken>, result: &mut Vec<u8>, worker_data: &WorkerData) {
     let l = v.len();
     if l >= 3 {
         if let RespBinaryString(k) = &v[1] {
@@ -211,11 +211,11 @@ pub fn run_set_command(v: Vec<RespToken>, result: &mut Vec<u8>, common_data: Arc
                                     'e' | 'E' => {
                                         match &v[4] {
                                             RespInteger(ex) => {
-                                                set_with_result(k, vv, *ex * 1000, result, common_data, worker_data);
+                                                set_with_result(k, vv, *ex * 1000, result, worker_data);
                                             }
                                             RespBinaryString(v) => {
                                                 if let Some(ex) = parse_number_from_vec(v) {
-                                                    set_with_result(k, vv, ex * 1000, result, common_data, worker_data);
+                                                    set_with_result(k, vv, ex * 1000, result, worker_data);
                                                 } else {
                                                     result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
                                                 }
@@ -227,11 +227,11 @@ pub fn run_set_command(v: Vec<RespToken>, result: &mut Vec<u8>, common_data: Arc
                                     'p'|'P' => {
                                         match &v[4] {
                                             RespInteger(ex) => {
-                                                set_with_result(k, vv, *ex, result, common_data, worker_data);
+                                                set_with_result(k, vv, *ex, result, worker_data);
                                             }
                                             RespBinaryString(v) => {
                                                 if let Some(ex) = parse_number_from_vec(v) {
-                                                    set_with_result(k, vv, ex, result, common_data, worker_data);
+                                                    set_with_result(k, vv, ex, result, worker_data);
                                                 } else {
                                                     result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
                                                 }
@@ -255,7 +255,7 @@ pub fn run_set_command(v: Vec<RespToken>, result: &mut Vec<u8>, common_data: Arc
     result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
 }
 
-pub fn run_hset_command(v: Vec<RespToken>, result: &mut Vec<u8>, common_data: Arc<CommonData>, worker_data: &WorkerData) {
+pub fn run_hset_command(v: Vec<RespToken>, result: &mut Vec<u8>, worker_data: &WorkerData) {
     let l = v.len();
     if l >= 4 && ((l & 1) == 0) {
         if let RespBinaryString(key) = &v[1] {

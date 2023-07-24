@@ -7,6 +7,9 @@ mod benchmark;
 mod common_maps;
 mod hash_builders;
 mod worker_data;
+mod value;
+mod errors;
+mod common_data_map;
 
 use std::env::args;
 use std::io::{Error, Read, Write};

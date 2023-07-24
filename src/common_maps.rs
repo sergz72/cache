@@ -1,91 +1,10 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::io::{Error, ErrorKind};
-use std::sync::{Arc, RwLock};
+use std::io::Error;
 use std::time::SystemTime;
 use crate::common_maps::GetResult::{Expired, Found, NotFound, WrongValue};
-use crate::common_maps::ValueHolder::StringValue;
-use crate::resp_encoder::{resp_encode_binary_string, resp_encode_map};
-use crate::worker_data::build_wrong_data_type_error;
-
-enum ValueHolder {
-    StringValue(Vec<u8>),
-    HashMapValue(HashMap<Vec<u8>, Vec<u8>>),
-    HashSetValue(HashSet<u8>)
-}
-struct Value {
-    value: ValueHolder,
-    last_access_time: u64,
-    expires_at: Option<u64>,
-}
-
-fn calculate_map_size(map: &HashMap<Vec<u8>, Vec<u8>>) -> usize {
-    map.iter().fold(0, |s, (k, v)| s + k.len() + v.len())
-}
-
-impl Value {
-    fn new(value: Vec<u8>, created_at: u64, expiration: Option<u64>) -> Value {
-        let expires_at = expiration.map(|e| created_at + e);
-        Value {
-            value: StringValue(value),
-            last_access_time: created_at,
-            expires_at,
-        }
-    }
-
-    fn new_hash(map: HashMap<Vec<u8>, Vec<u8>>, created_at: u64) -> Value {
-        Value {
-            value: None,
-            hvalue: Some(map),
-            last_access_time: created_at,
-            expires_at: None,
-        }
-    }
-
-    fn is_expired(&self, start_time: SystemTime) -> bool {
-        if let Some(e) = self.expires_at {
-            let now = SystemTime::now().duration_since(start_time).unwrap().as_millis() as u64;
-            if now >= e {
-                return true;
-            }
-        }
-        false
-    }
-
-    fn get_value(&self) -> &Option<Vec<u8>> {
-        &self.value
-    }
-
-    fn get_hvalue(&self) -> &Option<HashMap<Vec<u8>, Vec<u8>>> {
-        &self.hvalue
-    }
-
-    fn size(&self) -> usize {
-        self.value.as_ref().map(|v|v.len()).unwrap_or(0) +
-            self.hvalue.as_ref().map(|v|calculate_map_size(&v)).unwrap_or(0)
-    }
-
-    fn merge(&mut self, source: HashMap<Vec<u8>, Vec<u8>>) -> Result<isize, Error> {
-        let hv = self.hvalue.as_mut().ok_or(build_wrong_data_type_error())?;
-        let mut inserted = 0;
-        for (k, v) in source {
-            if None == hv.insert(k, v) {
-                inserted += 1;
-            }
-        }
-        Ok(inserted)
-    }
-
-    fn delete(&mut self, source: HashSet<&Vec<u8>>) -> Result<(isize, usize), Error> {
-        let hv = self.hvalue.as_mut().ok_or(build_wrong_data_type_error())?;
-        let mut deleted = 0;
-        for k in source {
-            if let Some(_) = hv.remove(k) {
-                deleted += 1;
-            }
-        }
-        Ok((deleted, hv.len()))
-    }
-}
+use crate::errors::build_out_of_memory_error;
+use crate::resp_encoder::{resp_encode_binary_string, resp_encode_int, resp_encode_map};
+use crate::value::Value;
 
 pub struct CommonMaps {
     cleanup_using_lru: bool,
@@ -96,7 +15,7 @@ pub struct CommonMaps {
     map_by_expiration: BTreeMap<u64, HashSet<Vec<u8>>>,
 }
 
-fn build_map(max_memory: usize, cleanup_using_lru: bool) -> CommonMaps {
+pub fn build_map(max_memory: usize, cleanup_using_lru: bool) -> CommonMaps {
     CommonMaps {
         cleanup_using_lru,
         current_memory: 0,
@@ -105,21 +24,6 @@ fn build_map(max_memory: usize, cleanup_using_lru: bool) -> CommonMaps {
         map_by_time: BTreeMap::new(),
         map_by_expiration: BTreeMap::new(),
     }
-}
-
-pub fn build_maps(vector_size: usize, all_memory: usize, cleanup_using_lru: bool) -> Arc<Vec<RwLock<CommonMaps>>> {
-    let max_memory = all_memory / vector_size;
-    Arc::new((0..vector_size)
-        .map(|_i| RwLock::new(build_map(max_memory, cleanup_using_lru)))
-        .collect())
-}
-
-pub fn load_maps(db_name: String, vector_size: usize, all_memory: usize, cleanup_using_lru: bool) -> Result<Arc<Vec<RwLock<CommonMaps>>>, Error> {
-    /*let max_memory = all_memory / vector_size;
-    Arc::new((0..vector_size)
-        .map(|_i| RwLock::new(build_map(max_memory, cleanup_using_lru)))
-        .collect())*/
-    todo!()
 }
 
 #[derive(PartialEq, Debug)]
@@ -132,10 +36,6 @@ pub enum GetResult {
 
 fn calculate_record_size(key_size: usize, value_size: usize) -> usize {
     3 * key_size + value_size + 16
-}
-
-fn build_out_of_memory_error() -> Error {
-    Error::new(ErrorKind::OutOfMemory, "out of memory")
 }
 
 impl CommonMaps {
@@ -157,9 +57,9 @@ impl CommonMaps {
                 h.remove(key);
             }
         }
-        let h = self.map_by_time.get_mut(&value.created_at).unwrap();
+        let h = self.map_by_time.get_mut(&value.last_access_time).unwrap();
         if h.len() == 1 {
-            self.map_by_time.remove(&value.created_at);
+            self.map_by_time.remove(&value.last_access_time);
         } else {
             h.remove(key);
         }
@@ -185,6 +85,9 @@ impl CommonMaps {
                     Expired
                 } else if let Some(v) = value.get_value() {
                     resp_encode_binary_string(v, result);
+                    Found
+                } else if let Some(v) = value.get_ivalue() {
+                    resp_encode_int(v, result);
                     Found
                 } else {
                     WrongValue
@@ -271,7 +174,7 @@ impl CommonMaps {
             self.current_memory -= size;
             return Err(build_out_of_memory_error());
         }
-        let created_at = v.created_at;
+        let created_at = v.last_access_time;
         let expires_at = v.expires_at;
         let v_size = v.size();
         if let Some(old) = self.map.insert(key.clone(), v) {
@@ -313,12 +216,12 @@ impl CommonMaps {
             self.current_memory -= size;
             return Err(build_out_of_memory_error());
         }
-        let created_at = v.created_at;
+        let created_at = v.last_access_time;
         let expires_at = v.expires_at;
         match self.map.get_mut(key) {
             Some(existing) => {
                 let size_before = existing.size();
-                let inserted = existing.merge(v.hvalue.unwrap())?;
+                let inserted = existing.merge(v.get_hvalue().unwrap())?;
                 self.current_memory -= size_before;
                 self.current_memory += existing.size();
                 Ok(inserted)

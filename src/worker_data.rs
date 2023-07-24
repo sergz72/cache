@@ -2,8 +2,10 @@ use std::collections::{HashMap, HashSet};
 use std::io::{Error, ErrorKind};
 use std::sync::Arc;
 use std::time::SystemTime;
-use crate::common_data::{CommonData, CommonDataMap};
+use crate::common_data::CommonData;
+use crate::common_data_map::CommonDataMap;
 use crate::common_maps;
+use crate::errors::build_wrong_data_type_error;
 use crate::hash_builders::HashBuilder;
 
 pub struct WorkerData {
@@ -15,10 +17,6 @@ pub struct WorkerData {
 
 fn parse_db_name(db_name: Vec<u8>) -> Result<String, Error> {
     String::from_utf8(db_name).map_err(|_|Error::new(ErrorKind::InvalidData, "-invalid database name\r\n"))
-}
-
-pub fn build_wrong_data_type_error() -> Error {
-    Error::new(ErrorKind::InvalidData, "-Operation against a key holding the wrong kind of value\r\n")
 }
 
 impl WorkerData {
