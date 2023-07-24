@@ -268,7 +268,7 @@ mod tests {
     fn test_set_delete() {
         let mut rng = rand::thread_rng();
         let mut keys = Vec::new();
-        let mut maps = build_map(100000000);
+        let mut maps = build_map(100000000, true);
         let start_time = SystemTime::now();
         for _i in 0..1000 {
             let key_length = (rng.gen::<usize>() % 100) + 10;
@@ -298,7 +298,7 @@ mod tests {
     #[test]
     fn test_cleanup() {
         let mut rng = rand::thread_rng();
-        let mut maps = build_map(100000);
+        let mut maps = build_map(100000, true);
         let start_time = SystemTime::now();
         for _i in 0..1000 {
             let key_length = (rng.gen::<usize>() % 100) + 10;
@@ -314,7 +314,7 @@ mod tests {
     #[test]
     fn test_cleanup2() {
         let mut rng = rand::thread_rng();
-        let mut maps = build_map(100000);
+        let mut maps = build_map(100000, true);
         let start_time = SystemTime::now();
         for _i in 0..1000 {
             let key_length = (rng.gen::<usize>() % 100) + 10;
@@ -337,7 +337,7 @@ mod tests {
     #[test]
     fn test_set_get() {
         let mut rng = rand::thread_rng();
-        let mut maps = build_map(1000000);
+        let mut maps = build_map(1000000, true);
         let start_time = SystemTime::now();
         let key_length = (rng.gen::<usize>() % 100) + 10;
         let value_length = (rng.gen::<usize>() % 200) + 10;

@@ -277,6 +277,22 @@ pub fn run_hset_command(v: Vec<RespToken>, result: &mut Vec<u8>, worker_data: &W
     result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
 }
 
+pub fn run_keys_command(v: Vec<RespToken>, result: &mut Vec<u8>, worker_data: &WorkerData) {
+    result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
+}
+
+pub fn run_sadd_command(v: Vec<RespToken>, result: &mut Vec<u8>, worker_data: &WorkerData) {
+    result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
+}
+
+pub fn run_srem_command(v: Vec<RespToken>, result: &mut Vec<u8>, worker_data: &WorkerData) {
+    result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
+}
+
+pub fn run_smembers_command(v: Vec<RespToken>, result: &mut Vec<u8>, worker_data: &WorkerData) {
+    result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
+}
+
 pub fn run_save_command(result: &mut Vec<u8>, worker_data: &WorkerData) {
     todo!()
 }

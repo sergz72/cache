@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use crate::resp_commands::{run_config_command, run_createdb_command, run_dbsize_command, run_del_command, run_flush_command, run_flushall_command, run_get_command, run_hdel_command, run_hget_command, run_hgetall_command, run_hset_command, run_loaddb_command, run_ping_command, run_save_command, run_select_command, run_set_command};
+use crate::resp_commands::{run_config_command, run_createdb_command, run_dbsize_command, run_del_command, run_flush_command, run_flushall_command, run_get_command, run_hdel_command, run_hget_command, run_hgetall_command, run_hset_command, run_keys_command, run_loaddb_command, run_ping_command, run_sadd_command, run_save_command, run_select_command, run_set_command, run_smembers_command, run_srem_command};
 use crate::resp_parser::RespToken::{RespArray, RespBinaryString, RespInteger, RespNullArray, RespNullString, RespString};
 use crate::common_data::CommonData;
 use crate::worker_data::WorkerData;
@@ -15,7 +15,7 @@ pub enum RespToken {
     RespBinaryString(Vec<u8>),
     RespInteger(isize),
     RespNullArray,
-    RespNullString
+    RespNullString,
 }
 
 pub static INVALID_COMMAND_ERROR: &str = "-invalid command\r\n";
@@ -55,7 +55,7 @@ fn run_command(token: RespToken, result: &mut Vec<u8>, common_data: Arc<CommonDa
                     RespBinaryString(s) => {
                         if s.len() > 0 {
                             match s[0] as char {
-                                'c'|'C' => {
+                                'c' | 'C' => {
                                     match s.len() {
                                         6 => {
                                             if check_name(s, 1, "onfig") {
@@ -63,18 +63,18 @@ fn run_command(token: RespToken, result: &mut Vec<u8>, common_data: Arc<CommonDa
                                             } else {
                                                 result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
                                             }
-                                        },
+                                        }
                                         8 => {
                                             if check_name(s, 1, "reatedb") {
                                                 run_createdb_command(v, result, common_data, worker_data);
                                             } else {
                                                 result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
                                             }
-                                        },
+                                        }
                                         _ => result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes())
                                     }
-                                },
-                                'd'|'D' => {
+                                }
+                                'd' | 'D' => {
                                     match s.len() {
                                         3 => if check_name(s, 1, "el") {
                                             run_del_command(v, result, worker_data);
@@ -88,8 +88,8 @@ fn run_command(token: RespToken, result: &mut Vec<u8>, common_data: Arc<CommonDa
                                         },
                                         _ => result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes())
                                     }
-                                },
-                                'f'|'F' => {
+                                }
+                                'f' | 'F' => {
                                     match s.len() {
                                         7 => {
                                             if check_name(s, 1, "lushdb") {
@@ -107,28 +107,28 @@ fn run_command(token: RespToken, result: &mut Vec<u8>, common_data: Arc<CommonDa
                                         }
                                         _ => result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes())
                                     }
-                                },
-                                'g'|'G' => {
+                                }
+                                'g' | 'G' => {
                                     if check_name(s, 1, "et") {
                                         run_get_command(v, result, worker_data);
                                     } else {
                                         result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
                                     }
-                                },
-                                'h'|'H' => {
+                                }
+                                'h' | 'H' => {
                                     match s.len() {
                                         4 => match s[1] as char {
-                                            'g'|'G' => if check_name(s, 2, "et") {
+                                            'g' | 'G' => if check_name(s, 2, "et") {
                                                 run_hget_command(v, result, worker_data);
                                             } else {
                                                 result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
                                             },
-                                            's'|'S' => if check_name(s, 2, "et") {
+                                            's' | 'S' => if check_name(s, 2, "et") {
                                                 run_hset_command(v, result, worker_data);
                                             } else {
                                                 result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
                                             },
-                                            'd'|'D' => if check_name(s, 2, "el") {
+                                            'd' | 'D' => if check_name(s, 2, "el") {
                                                 run_hdel_command(v, result, worker_data);
                                             } else {
                                                 result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
@@ -142,33 +142,67 @@ fn run_command(token: RespToken, result: &mut Vec<u8>, common_data: Arc<CommonDa
                                         },
                                         _ => result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes())
                                     }
-                                },
-                                'l'|'L' => {
+                                }
+                                'k' | 'K' => {
+                                    if check_name(s, 1, "eys") {
+                                        run_keys_command(v, result, worker_data);
+                                    } else {
+                                        result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
+                                    }
+                                }
+                                'l' | 'L' => {
                                     if check_name(s, 1, "oaddb") {
                                         run_loaddb_command(v, result, common_data, worker_data);
                                     } else {
                                         result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
                                     }
-                                },
-                                'p'|'P' => {
+                                }
+                                'p' | 'P' => {
                                     if check_name(s, 1, "ing") {
                                         run_ping_command(v, result);
                                     } else {
                                         result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
                                     }
-                                },
-                                's'|'S' => {
+                                }
+                                's' | 'S' => {
                                     match s.len() {
                                         3 => if check_name(s, 1, "et") {
                                             run_set_command(v, result, worker_data);
                                         } else {
                                             result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
                                         },
-                                        4 => if check_name(s, 1, "ave") {
-                                            run_save_command(result, worker_data);
-                                        } else {
-                                            result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
-                                        },
+                                        4 => {
+                                            match s[1] as char {
+                                                'a'|'A' => {
+                                                    match s[2] as char {
+                                                        'd'|'D' => {
+                                                            match s[3] as char {
+                                                              'd'|'D' => run_sadd_command(v, result, worker_data),
+                                                               _ => result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes())
+                                                            }
+                                                        },
+                                                        'v'|'V' => {
+                                                            match s[3] as char {
+                                                                'e'|'E' => run_save_command(result, worker_data),
+                                                                _ => result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes())
+                                                            }
+                                                        }
+                                                        _ => result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes())
+                                                    }
+                                                },
+                                                'm'|'M' => if check_name(s, 1, "embers") {
+                                                    run_smembers_command(v, result, worker_data);
+                                                } else {
+                                                    result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
+                                                },
+                                                'r'|'R' => if check_name(s, 1, "em") {
+                                                    run_srem_command(v, result, worker_data);
+                                                } else {
+                                                    result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
+                                                },
+                                                _ => result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes())
+                                            }
+                                        }
                                         6 => if check_name(s, 1, "elect") {
                                             run_select_command(v, result, common_data, worker_data);
                                         } else {
@@ -176,7 +210,7 @@ fn run_command(token: RespToken, result: &mut Vec<u8>, common_data: Arc<CommonDa
                                         },
                                         _ => result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes())
                                     }
-                                },
+                                }
                                 _ => result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes())
                             }
                             return;
@@ -192,13 +226,13 @@ fn run_command(token: RespToken, result: &mut Vec<u8>, common_data: Arc<CommonDa
         RespString(s) => {
             if s.len() > 0 {
                 match s[0] as char {
-                    'p'|'P' => {
+                    'p' | 'P' => {
                         if check_name(&s, 1, "ing") {
                             run_ping_command(Vec::new(), result);
                         } else {
                             result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
                         }
-                    },
+                    }
                     _ => result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes())
                 }
                 return;
@@ -209,7 +243,7 @@ fn run_command(token: RespToken, result: &mut Vec<u8>, common_data: Arc<CommonDa
     }
 }
 
-fn parse_tokens(buffer: &[u8], amt: usize) -> Result<Vec<RespToken>, &'static str>  {
+fn parse_tokens(buffer: &[u8], amt: usize) -> Result<Vec<RespToken>, &'static str> {
     let mut idx = 0;
     let mut tokens = Vec::new();
     while idx < amt {
@@ -252,7 +286,7 @@ fn parse_string(buffer: &[u8], idx: usize, amt: usize) -> Result<(usize, Vec<u8>
     let mut new_idx = idx;
     while new_idx < amt {
         if buffer[new_idx] == '\r' as u8 {
-            return Ok((new_idx+2, Vec::from(&buffer[idx..new_idx])));
+            return Ok((new_idx + 2, Vec::from(&buffer[idx..new_idx])));
         }
         new_idx += 1;
     }
@@ -265,7 +299,7 @@ fn parse_binary_string(buffer: &[u8], idx: usize, amt: usize) -> Result<(usize, 
         return Ok((new_idx, RespNullString));
     }
     if count == 0 {
-        return Ok((new_idx + 2, RespBinaryString(Vec::new())))
+        return Ok((new_idx + 2, RespBinaryString(Vec::new())));
     }
     if count < 0 {
         return Err(INVALID_COMMAND_ERROR);
@@ -301,7 +335,7 @@ fn parse_number(buffer: &[u8], idx: usize, amt: usize) -> Result<(usize, isize),
     let mut new_idx = idx;
     loop {
         if new_idx >= amt {
-            break
+            break;
         }
         let c = buffer[new_idx];
         match c as char {
@@ -327,7 +361,7 @@ mod tests {
     use crate::hash_builders::create_hash_builder;
     use crate::resp_parser::{parse_tokens, resp_parse};
     use crate::resp_parser::RespToken::{RespArray, RespBinaryString, RespInteger, RespString};
-    use crate::server::WorkerData;
+    use crate::worker_data::WorkerData;
 
     const BUFFER: &[u8] = "PING\r\n*5\r\n$3\r\nset\r\n$1\r\na\r\n$1\r\nb\r\n$2\r\nex\r\n:10\r\n*3\r\n$6\r\nconfig\r\n$3\r\nget\r\n$4\r\nsave\r\n".as_bytes();
 
@@ -338,7 +372,7 @@ mod tests {
         match &result[0] {
             RespString(s) => {
                 assert_eq!(s, &"PING".to_string().into_bytes());
-            },
+            }
             _ => return Err("error")
         }
         match &result[1] {
@@ -349,7 +383,7 @@ mod tests {
                 assert_eq!(v[2], RespBinaryString(Vec::from(['b' as u8])));
                 assert_eq!(v[3], RespBinaryString(Vec::from(['e' as u8, 'x' as u8])));
                 assert_eq!(v[4], RespInteger(10));
-            },
+            }
             _ => return Err("error")
         }
         match &result[2] {
@@ -359,7 +393,7 @@ mod tests {
                 assert_eq!(v[1], RespBinaryString(Vec::from(['g' as u8, 'e' as u8, 't' as u8])));
                 assert_eq!(v[2], RespBinaryString(Vec::from(['s' as u8, 'a' as u8, 'v' as u8, 'e' as u8])));
                 Ok(())
-            },
+            }
             _ => Err("error")
         }
     }
@@ -368,7 +402,7 @@ mod tests {
     fn test_parse() {
         let common_data = Arc::new(build_common_data(false,
                                                      1000, 1,
-                                                     create_hash_builder("sum".to_string(), 1).unwrap()));
+                                                     true, 1, create_hash_builder("sum".to_string(), 1).unwrap()));
         let mut worker_data = WorkerData::new("0".to_string().into_bytes(), common_data.clone()).unwrap();
         let result = resp_parse(BUFFER, BUFFER.len(), common_data, &mut worker_data);
         assert_eq!(result.as_slice(), "+PONG\r\n+OK\r\n*2\r\n$4\r\nsave\r\n$0\r\n\r\n".as_bytes());
