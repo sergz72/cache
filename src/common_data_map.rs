@@ -10,14 +10,6 @@ pub struct CommonDataMap {
     is_updated: AtomicBool
 }
 
-pub fn load_maps(db_name: String, vector_size: usize, all_memory: usize, cleanup_using_lru: bool) -> Result<Arc<CommonDataMap>, Error> {
-    /*let max_memory = all_memory / vector_size;
-    Arc::new((0..vector_size)
-        .map(|_i| RwLock::new(build_map(max_memory, cleanup_using_lru)))
-        .collect())*/
-    todo!()
-}
-
 impl CommonDataMap {
     pub fn new(vector_size: usize, all_memory: usize, cleanup_using_lru: bool, start_time: SystemTime) -> Arc<CommonDataMap> {
         let max_memory = all_memory / vector_size;
@@ -29,6 +21,14 @@ impl CommonDataMap {
             last_access_time: AtomicU64::new(now),
             is_updated: AtomicBool::new(false)
         })
+    }
+
+    pub fn load(db_name: String, vector_size: usize, all_memory: usize, cleanup_using_lru: bool) -> Result<Arc<CommonDataMap>, Error> {
+        /*let max_memory = all_memory / vector_size;
+        Arc::new((0..vector_size)
+            .map(|_i| RwLock::new(build_map(max_memory, cleanup_using_lru)))
+            .collect())*/
+        todo!()
     }
 
     pub fn flush(&self) {

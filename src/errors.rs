@@ -1,7 +1,7 @@
 use std::io::{Error, ErrorKind};
 
 pub fn build_out_of_memory_error() -> Error {
-    Error::new(ErrorKind::OutOfMemory, "out of memory")
+    Error::new(ErrorKind::OutOfMemory, "-out of memory\r\n")
 }
 
 pub fn build_wrong_data_type_error() -> Error {

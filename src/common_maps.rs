@@ -4,14 +4,61 @@ use std::time::SystemTime;
 use crate::common_maps::GetResult::{Expired, Found, NotFound, WrongValue};
 use crate::errors::build_out_of_memory_error;
 use crate::resp_encoder::{resp_encode_binary_string, resp_encode_int, resp_encode_map};
-use crate::value::Value;
+use crate::value::{Value, ValueHolder};
+
+struct MapByTime {
+    map: BTreeMap<u64, HashSet<Vec<u8>>>,
+}
+
+impl MapByTime {
+    fn new() -> MapByTime {
+        MapByTime { map: BTreeMap::new() }
+    }
+
+    fn update(&mut self, key: &Vec<u8>, old: u64, new: u64) {
+        self.remove(key, old);
+        self.insert(key, new);
+    }
+
+    fn clear(&mut self) {
+        self.map.clear();
+    }
+
+    fn remove(&mut self, key: &Vec<u8>, value: u64) {
+        let h = self.map.get_mut(&value).unwrap();
+        if h.len() == 1 {
+            self.map.remove(&value);
+        } else {
+            h.remove(key);
+        }
+    }
+
+    fn first_key_value(&self) -> Option<(&u64, &HashSet<Vec<u8>>)> {
+        self.map.first_key_value()
+    }
+
+    fn insert(&mut self, key: &Vec<u8>, created_at: u64) {
+        match self.map.get_mut(&created_at) {
+            Some(v) => { let _ = v.insert(key.clone()); }
+            None => {
+                let mut s = HashSet::new();
+                s.insert(key.clone());
+                self.map.insert(created_at, s);
+            }
+        };
+    }
+
+    fn len(&self) -> usize {
+        self.map.len()
+    }
+}
 
 pub struct CommonMaps {
     cleanup_using_lru: bool,
     max_memory: usize,
     current_memory: usize,
     map: HashMap<Vec<u8>, Value>,
-    map_by_time: BTreeMap<u64, HashSet<Vec<u8>>>,
+    map_by_time: MapByTime,
     map_by_expiration: BTreeMap<u64, HashSet<Vec<u8>>>,
 }
 
@@ -21,7 +68,7 @@ pub fn build_map(max_memory: usize, cleanup_using_lru: bool) -> CommonMaps {
         current_memory: 0,
         max_memory,
         map: HashMap::new(),
-        map_by_time: BTreeMap::new(),
+        map_by_time: MapByTime::new(),
         map_by_expiration: BTreeMap::new(),
     }
 }
@@ -31,7 +78,7 @@ pub enum GetResult {
     NotFound,
     Found,
     Expired,
-    WrongValue
+    WrongValue,
 }
 
 fn calculate_record_size(key_size: usize, value_size: usize) -> usize {
@@ -57,11 +104,8 @@ impl CommonMaps {
                 h.remove(key);
             }
         }
-        let h = self.map_by_time.get_mut(&value.last_access_time).unwrap();
-        if h.len() == 1 {
-            self.map_by_time.remove(&value.last_access_time);
-        } else {
-            h.remove(key);
+        if self.cleanup_using_lru {
+            self.map_by_time.remove(key, value.last_access_time);
         }
     }
 
@@ -78,16 +122,22 @@ impl CommonMaps {
         keys.into_iter().map(|k| self.removekey(k)).sum()
     }
 
-    pub fn get(&self, key: &Vec<u8>, result: &mut Vec<u8>, start_time: SystemTime) -> GetResult {
-        return match self.map.get(key) {
+    pub fn get(&mut self, key: &Vec<u8>, result: &mut Vec<u8>, start_time: SystemTime) -> GetResult {
+        return match self.map.get_mut(key) {
             Some(value) => {
                 if value.is_expired(start_time) {
                     Expired
                 } else if let Some(v) = value.get_value() {
                     resp_encode_binary_string(v, result);
+                    let now = SystemTime::now().duration_since(start_time).unwrap().as_millis() as u64;
+                    self.map_by_time.update(key, value.last_access_time, now);
+                    value.last_access_time = now;
                     Found
                 } else if let Some(v) = value.get_ivalue() {
                     resp_encode_int(v, result);
+                    let now = SystemTime::now().duration_since(start_time).unwrap().as_millis() as u64;
+                    self.map_by_time.update(key, value.last_access_time, now);
+                    value.last_access_time = now;
                     Found
                 } else {
                     WrongValue
@@ -97,14 +147,17 @@ impl CommonMaps {
         };
     }
 
-    pub fn hget(&self, key: &Vec<u8>, map_key: &Vec<u8>, result: &mut Vec<u8>, start_time: SystemTime) -> GetResult {
-        return match self.map.get(key) {
+    pub fn hget(&mut self, key: &Vec<u8>, map_key: &Vec<u8>, result: &mut Vec<u8>, start_time: SystemTime) -> GetResult {
+        return match self.map.get_mut(key) {
             Some(value) => {
                 if value.is_expired(start_time) {
                     Expired
                 } else if let Some(v) = value.get_hvalue() {
                     if let Some(vv) = v.get(map_key) {
                         resp_encode_binary_string(vv, result);
+                        let now = SystemTime::now().duration_since(start_time).unwrap().as_millis() as u64;
+                        self.map_by_time.update(key, value.last_access_time, now);
+                        value.last_access_time = now;
                         Found
                     } else {
                         NotFound
@@ -117,13 +170,16 @@ impl CommonMaps {
         };
     }
 
-    pub fn hgetall(&self, key: &Vec<u8>, result: &mut Vec<u8>, start_time: SystemTime) -> GetResult {
-        return match self.map.get(key) {
+    pub fn hgetall(&mut self, key: &Vec<u8>, result: &mut Vec<u8>, start_time: SystemTime) -> GetResult {
+        return match self.map.get_mut(key) {
             Some(value) => {
                 if value.is_expired(start_time) {
                     Expired
                 } else if let Some(v) = value.get_hvalue() {
                     resp_encode_map(v, result);
+                    let now = SystemTime::now().duration_since(start_time).unwrap().as_millis() as u64;
+                    self.map_by_time.update(key, value.last_access_time, now);
+                    value.last_access_time = now;
                     Found
                 } else {
                     WrongValue
@@ -165,9 +221,9 @@ impl CommonMaps {
         true
     }
 
-    pub fn set(&mut self, key: &Vec<u8>, value: &Vec<u8>, expiry: Option<u64>, start_time: SystemTime) -> Result<(), Error> {
+    pub fn set(&mut self, key: &Vec<u8>, value: ValueHolder, expiry: Option<u64>, start_time: SystemTime) -> Result<(), Error> {
         let created_at = SystemTime::now().duration_since(start_time).unwrap().as_millis() as u64;
-        let v = Value::new(value.clone(), created_at, expiry);
+        let v = Value::new(value, created_at, expiry);
         let size = calculate_record_size(key.len(), v.size());
         self.current_memory += size;
         if !self.cleanup(start_time) {
@@ -196,14 +252,9 @@ impl CommonMaps {
                 }
             };
         }
-        match self.map_by_time.get_mut(&created_at) {
-            Some(v) => { let _ = v.insert(key.clone()); }
-            None => {
-                let mut s = HashSet::new();
-                s.insert(key.clone());
-                self.map_by_time.insert(created_at, s);
-            }
-        };
+        if self.cleanup_using_lru {
+            self.map_by_time.insert(key, created_at);
+        }
     }
 
     pub fn hset(&mut self, key: &Vec<u8>, values: HashMap<Vec<u8>, Vec<u8>>, start_time: SystemTime) -> Result<isize, Error> {
@@ -225,12 +276,12 @@ impl CommonMaps {
                 self.current_memory -= size_before;
                 self.current_memory += existing.size();
                 Ok(inserted)
-            },
+            }
             None => {
                 self.map.insert(key.clone(), v);
                 self.add_to_maps(key, created_at, expires_at);
                 Ok(values_len)
-            },
+            }
         }
     }
 
@@ -245,7 +296,7 @@ impl CommonMaps {
                     self.removekey(key);
                 }
                 Ok(deleted)
-            },
+            }
             None => Ok(0),
         }
     }
@@ -257,15 +308,17 @@ impl CommonMaps {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Error;
     use std::thread;
     use std::time::{Duration, SystemTime};
     use rand::distributions::{Alphanumeric, DistString};
     use rand::Rng;
     use crate::common_maps::build_map;
     use crate::common_maps::GetResult::{Expired, Found, NotFound};
+    use crate::value::ValueHolder::StringValue;
 
     #[test]
-    fn test_set_delete() {
+    fn test_set_delete() -> Result<(), Error> {
         let mut rng = rand::thread_rng();
         let mut keys = Vec::new();
         let mut maps = build_map(100000000, true);
@@ -274,15 +327,15 @@ mod tests {
             let key_length = (rng.gen::<usize>() % 100) + 10;
             let value_length = (rng.gen::<usize>() % 200) + 10;
             let key = Alphanumeric.sample_string(&mut rng, key_length).into_bytes();
-            let value = Alphanumeric.sample_string(&mut rng, value_length).into_bytes();
-            maps.set(&key, &value, None, start_time);
+            let value = StringValue(Alphanumeric.sample_string(&mut rng, value_length).into_bytes());
+            maps.set(&key, value, None, start_time)?;
             keys.push(key);
         }
 
         for key in &keys {
             let value_length = (rng.gen::<usize>() % 200) + 10;
-            let value = Alphanumeric.sample_string(&mut rng, value_length).into_bytes();
-            maps.set(key, &value, None, start_time);
+            let value = StringValue(Alphanumeric.sample_string(&mut rng, value_length).into_bytes());
+            maps.set(key, value, None, start_time)?;
         }
 
         for key in keys {
@@ -293,10 +346,12 @@ mod tests {
         assert_eq!(maps.map_by_time.len(), 0);
         assert_eq!(maps.map_by_expiration.len(), 0);
         assert_eq!(maps.current_memory, 0);
+
+        Ok(())
     }
 
     #[test]
-    fn test_cleanup() {
+    fn test_cleanup() -> Result<(), Error> {
         let mut rng = rand::thread_rng();
         let mut maps = build_map(100000, true);
         let start_time = SystemTime::now();
@@ -304,15 +359,17 @@ mod tests {
             let key_length = (rng.gen::<usize>() % 100) + 10;
             let value_length = (rng.gen::<usize>() % 200) + 10;
             let key = Alphanumeric.sample_string(&mut rng, key_length).into_bytes();
-            let value = Alphanumeric.sample_string(&mut rng, value_length).into_bytes();
-            maps.set(&key, &value, None, start_time);
+            let value = StringValue(Alphanumeric.sample_string(&mut rng, value_length).into_bytes());
+            maps.set(&key, value, None, start_time)?;
         }
 
         assert!(maps.current_memory - 1000 < maps.max_memory);
+
+        Ok(())
     }
 
     #[test]
-    fn test_cleanup2() {
+    fn test_cleanup2() -> Result<(), Error> {
         let mut rng = rand::thread_rng();
         let mut maps = build_map(100000, true);
         let start_time = SystemTime::now();
@@ -320,22 +377,24 @@ mod tests {
             let key_length = (rng.gen::<usize>() % 100) + 10;
             let value_length = (rng.gen::<usize>() % 200) + 10;
             let key = Alphanumeric.sample_string(&mut rng, key_length).into_bytes();
-            let value = Alphanumeric.sample_string(&mut rng, value_length).into_bytes();
-            maps.set(&key, &value, Some(100), start_time);
+            let value = StringValue(Alphanumeric.sample_string(&mut rng, value_length).into_bytes());
+            maps.set(&key, value, Some(100), start_time)?;
         }
 
         thread::sleep(Duration::from_millis(200));
 
         let key_length = (rng.gen::<usize>() % 100) + 10;
         let key = Alphanumeric.sample_string(&mut rng, key_length).into_bytes();
-        let value = Alphanumeric.sample_string(&mut rng, 20000).into_bytes();
-        maps.set(&key, &value, None, start_time);
+        let value = StringValue(Alphanumeric.sample_string(&mut rng, 20000).into_bytes());
+        maps.set(&key, value, None, start_time)?;
 
         assert_eq!(maps.size(), 1);
+
+        Ok(())
     }
 
     #[test]
-    fn test_set_get() {
+    fn test_set_get() -> Result<(), Error> {
         let mut rng = rand::thread_rng();
         let mut maps = build_map(1000000, true);
         let start_time = SystemTime::now();
@@ -343,8 +402,8 @@ mod tests {
         let value_length = (rng.gen::<usize>() % 200) + 10;
         let key = Alphanumeric.sample_string(&mut rng, key_length).into_bytes();
         let key2 = Alphanumeric.sample_string(&mut rng, key_length).into_bytes();
-        let value = Alphanumeric.sample_string(&mut rng, value_length).into_bytes();
-        maps.set(&key, &value, Some(100), start_time);
+        let value = StringValue(Alphanumeric.sample_string(&mut rng, value_length).into_bytes());
+        maps.set(&key, value, Some(100), start_time)?;
 
         let mut result = Vec::new();
 
@@ -354,5 +413,7 @@ mod tests {
         thread::sleep(Duration::from_millis(200));
 
         assert_eq!(maps.get(&key, &mut result, start_time), Expired);
+
+        Ok(())
     }
 }

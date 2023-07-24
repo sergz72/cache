@@ -5,7 +5,7 @@ use std::net::TcpStream;
 use std::sync::{Arc, Mutex, RwLock};
 use std::sync::atomic::AtomicBool;
 use std::time::SystemTime;
-use crate::common_data_map::{CommonDataMap, load_maps};
+use crate::common_data_map::CommonDataMap;
 use crate::hash_builders::HashBuilder;
 
 pub struct CommonData {
@@ -56,7 +56,7 @@ impl CommonData {
         match self.maps_map.write().unwrap().entry(db_name.clone()) {
             Entry::Occupied(e) => Ok(e.get().clone()),
             Entry::Vacant(e) => {
-                let maps = load_maps(db_name_clone, self.vector_size, self.max_memory, self.cleanup_using_lru)?;
+                let maps = CommonDataMap::load(db_name_clone, self.vector_size, self.max_memory, self.cleanup_using_lru)?;
                 e.insert(maps.clone());
                 self.insert_to_map_by_time(db_name);
                 Ok(maps)

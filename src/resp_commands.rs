@@ -4,6 +4,8 @@ use crate::resp_encoder::{resp_encode_array2, resp_encode_binary_string, resp_en
 use crate::resp_parser::{check_name, INVALID_COMMAND_ERROR, RespToken};
 use crate::resp_parser::RespToken::{RespBinaryString, RespInteger};
 use crate::common_data::CommonData;
+use crate::value::ValueHolder;
+use crate::value::ValueHolder::{IntValue, StringValue};
 use crate::worker_data::WorkerData;
 
 static NULL_STRING: &[u8] = "$-1\r\n".as_bytes();
@@ -167,7 +169,7 @@ pub fn run_hget_command(v: Vec<RespToken>, result: &mut Vec<u8>, worker_data: &W
     result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
 }
 
-fn set_with_result(k: &Vec<u8>, vv: &Vec<u8>, e: isize, result: &mut Vec<u8>, worker_data: &WorkerData) {
+fn set_with_result(k: &Vec<u8>, vv: ValueHolder, e: isize, result: &mut Vec<u8>, worker_data: &WorkerData) {
     if e <= 0 {
         result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
     } else {
@@ -195,9 +197,16 @@ pub fn run_set_command(v: Vec<RespToken>, result: &mut Vec<u8>, worker_data: &Wo
     let l = v.len();
     if l >= 3 {
         if let RespBinaryString(k) = &v[1] {
-            if let RespBinaryString(vv) = &v[2] {
+            let value = match &v[2] {
+                RespBinaryString(v) => StringValue(v.clone()),
+                RespInteger(i) => IntValue(*i),
+                _ => {
+                    result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
+                    return;
+                }
+            };
                 if l == 3 {
-                    match worker_data.set(k, vv, None) {
+                    match worker_data.set(k, value, None) {
                         Ok(()) => result.extend_from_slice(OK),
                         Err(e) => result.extend_from_slice(e.to_string().as_bytes())
                     }
@@ -211,11 +220,11 @@ pub fn run_set_command(v: Vec<RespToken>, result: &mut Vec<u8>, worker_data: &Wo
                                     'e' | 'E' => {
                                         match &v[4] {
                                             RespInteger(ex) => {
-                                                set_with_result(k, vv, *ex * 1000, result, worker_data);
+                                                set_with_result(k, value, *ex * 1000, result, worker_data);
                                             }
                                             RespBinaryString(v) => {
                                                 if let Some(ex) = parse_number_from_vec(v) {
-                                                    set_with_result(k, vv, ex * 1000, result, worker_data);
+                                                    set_with_result(k, value, ex * 1000, result, worker_data);
                                                 } else {
                                                     result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
                                                 }
@@ -227,11 +236,11 @@ pub fn run_set_command(v: Vec<RespToken>, result: &mut Vec<u8>, worker_data: &Wo
                                     'p'|'P' => {
                                         match &v[4] {
                                             RespInteger(ex) => {
-                                                set_with_result(k, vv, *ex, result, worker_data);
+                                                set_with_result(k, value, *ex, result, worker_data);
                                             }
                                             RespBinaryString(v) => {
                                                 if let Some(ex) = parse_number_from_vec(v) {
-                                                    set_with_result(k, vv, ex, result, worker_data);
+                                                    set_with_result(k, value, ex, result, worker_data);
                                                 } else {
                                                     result.extend_from_slice(INVALID_COMMAND_ERROR.as_bytes());
                                                 }
@@ -247,7 +256,6 @@ pub fn run_set_command(v: Vec<RespToken>, result: &mut Vec<u8>, worker_data: &Wo
                                 }
                             }
                         }
-                    }
                 }
             }
         }

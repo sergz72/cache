@@ -7,6 +7,7 @@ use crate::common_data_map::CommonDataMap;
 use crate::common_maps;
 use crate::errors::build_wrong_data_type_error;
 use crate::hash_builders::HashBuilder;
+use crate::value::ValueHolder;
 
 pub struct WorkerData {
     current_db_name: String,
@@ -52,7 +53,7 @@ impl WorkerData {
 
     pub fn hgetall(&self, key: &Vec<u8>, result: &mut Vec<u8>) -> Result<bool, Error> {
         let idx = self.hash_builder.build_hash(key);
-        let lock = self.current_db.get_read_lock(idx);
+        let mut lock = self.current_db.get_write_lock(idx);
         match lock.hgetall(key, result, self.start_time) {
             common_maps::GetResult::Found => Ok(true),
             common_maps::GetResult::NotFound => Ok(false),
@@ -71,7 +72,7 @@ impl WorkerData {
 
     pub fn get(&self, key: &Vec<u8>, result: &mut Vec<u8>) -> Result<bool, Error> {
         let idx = self.hash_builder.build_hash(key);
-        let lock = self.current_db.get_read_lock(idx);
+        let mut lock = self.current_db.get_write_lock(idx);
         match lock.get(key, result, self.start_time) {
             common_maps::GetResult::Found => Ok(true),
             common_maps::GetResult::NotFound => Ok(false),
@@ -89,7 +90,7 @@ impl WorkerData {
         self.current_db.get_write_lock(idx).hdel(key, keys)
     }
 
-    pub fn set(&self, key: &Vec<u8>, value: &Vec<u8>, expiry: Option<u64>) -> Result<(), Error> {
+    pub fn set(&self, key: &Vec<u8>, value: ValueHolder, expiry: Option<u64>) -> Result<(), Error> {
         let idx = self.hash_builder.build_hash(key);
         self.current_db.get_write_lock(idx).set(key, value, expiry, self.start_time)
     }
@@ -101,7 +102,7 @@ impl WorkerData {
 
     pub fn hget(&self, key: &Vec<u8>, map_key: &Vec<u8>, result: &mut Vec<u8>) -> Result<bool, Error> {
         let idx = self.hash_builder.build_hash(key);
-        let lock = self.current_db.get_read_lock(idx);
+        let mut lock = self.current_db.get_write_lock(idx);
         match lock.hget(key, map_key, result, self.start_time) {
             common_maps::GetResult::Found => Ok(true),
             common_maps::GetResult::NotFound => Ok(false),

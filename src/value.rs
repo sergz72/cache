@@ -4,7 +4,7 @@ use std::time::SystemTime;
 use crate::errors::build_wrong_data_type_error;
 use crate::value::ValueHolder::{HashMapValue, HashSetValue, IntValue, StringValue};
 
-enum ValueHolder {
+pub enum ValueHolder {
     IntValue(isize),
     StringValue(Vec<u8>),
     HashMapValue(HashMap<Vec<u8>, Vec<u8>>),
@@ -37,19 +37,10 @@ pub struct Value {
 }
 
 impl Value {
-    pub fn new(value: Vec<u8>, created_at: u64, expiration: Option<u64>) -> Value {
+    pub fn new(value: ValueHolder, created_at: u64, expiration: Option<u64>) -> Value {
         let expires_at = expiration.map(|e| created_at + e);
         Value {
-            value: StringValue(value),
-            last_access_time: created_at,
-            expires_at,
-        }
-    }
-
-    pub fn new_int(value: isize, created_at: u64, expiration: Option<u64>) -> Value {
-        let expires_at = expiration.map(|e| created_at + e);
-        Value {
-            value: IntValue(value),
+            value,
             last_access_time: created_at,
             expires_at,
         }
