@@ -1,9 +1,9 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::collections::hash_map::Entry;
 use std::io::{Error, ErrorKind};
 use std::net::TcpStream;
 use std::sync::{Arc, Mutex, RwLock};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::time::SystemTime;
 use crate::common_data_map::CommonDataMap;
 use crate::generic_maps::{GenericMaps, RecordSizeCalculator};
@@ -25,6 +25,7 @@ pub struct CommonData {
     maps_map: RwLock<GenericMaps<String, CommonDataMap, DBCountCalculator>>,
     pub exit_flag: AtomicBool,
     pub threads: RwLock<HashMap<usize, Arc<Mutex<TcpStream>>>>,
+    max_memory: usize,
     vector_size: usize,
     cleanup_using_lru: bool
 }

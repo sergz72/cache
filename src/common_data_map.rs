@@ -1,11 +1,22 @@
 use std::io::Error;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::time::SystemTime;
 use crate::common_maps::{build_map, CommonMaps};
+use crate::generic_maps::SizedValue;
 
 pub struct CommonDataMap {
     map: Vec<RwLock<CommonMaps>>,
+}
+
+impl SizedValue for CommonDataMap {
+    fn size(&self) -> usize {
+        1
+    }
+
+    fn len(&self) -> usize {
+        1
+    }
 }
 
 impl CommonDataMap {
@@ -42,7 +53,7 @@ impl CommonDataMap {
         self.map[idx].write().unwrap()
     }
 
-    pub fn size(&self) -> usize {
+    pub fn dbsize(&self) -> usize {
         self.map.iter().map(|m|m.read().unwrap().size()).sum()
     }
 }

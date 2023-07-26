@@ -1,12 +1,11 @@
 use std::collections::{HashMap, HashSet};
 use std::io::Error;
-use std::sync::atomic::Ordering;
 use std::time::SystemTime;
 use crate::common_maps::GetResult::{Expired, Found, NotFound, WrongValue};
-use crate::errors::build_out_of_memory_error;
-use crate::generic_maps::{GenericMaps, GenericValue, RecordSizeCalculator};
+use crate::generic_maps::{GenericMaps, RecordSizeCalculator, SizedValue};
 use crate::resp_encoder::{resp_encode_binary_string, resp_encode_int, resp_encode_map};
 use crate::value::ValueHolder;
+use crate::value::ValueHolder::HashMapValue;
 
 struct ValueHolderSizeCalculator{}
 impl RecordSizeCalculator<Vec<u8>, ValueHolder> for ValueHolderSizeCalculator {
@@ -16,13 +15,11 @@ impl RecordSizeCalculator<Vec<u8>, ValueHolder> for ValueHolderSizeCalculator {
 }
 
 pub struct CommonMaps {
-    cleanup_using_lru: bool,
     maps: GenericMaps<Vec<u8>, ValueHolder, ValueHolderSizeCalculator>,
 }
 
 pub fn build_map(max_memory: usize, cleanup_using_lru: bool) -> CommonMaps {
     CommonMaps {
-        cleanup_using_lru,
         maps: GenericMaps::new(cleanup_using_lru, ValueHolderSizeCalculator{}, max_memory)
     }
 }
@@ -98,69 +95,16 @@ impl CommonMaps {
     }
 
     pub fn set(&mut self, key: &Vec<u8>, value: ValueHolder, expiry: Option<u64>, start_time: SystemTime) -> Result<(), Error> {
-        let created_at = SystemTime::now().duration_since(start_time).unwrap().as_millis() as u64;
-        let v = GenericValue::new(value, created_at, expiry);
-        let size = calculate_record_size(key.len(), v.size());
-        self.current_memory += size;
-        if !self.cleanup(start_time) {
-            self.current_memory -= size;
-            return Err(build_out_of_memory_error());
-        }
-        let created_at = v.last_access_time.load(Ordering::Relaxed);
-        let expires_at = v.expires_at;
-        let v_size = v.size();
-        if let Some(old) = self.map.insert(key.clone(), v) {
-            self.current_memory = self.current_memory - size + v_size - old.size();
-            self.aux_maps.write().unwrap().remove(key, old.expires_at,
-                                                  old.last_access_time.load(Ordering::Relaxed),
-                                                  self.cleanup_using_lru);
-        }
-        self.aux_maps.write().unwrap().add(key, created_at, expires_at, self.cleanup_using_lru);
-        Ok(())
+        self.maps.set(key, value, expiry, start_time)
     }
 
     pub fn hset(&mut self, key: &Vec<u8>, values: HashMap<Vec<u8>, Vec<u8>>, start_time: SystemTime) -> Result<isize, Error> {
-        let created_at = SystemTime::now().duration_since(start_time).unwrap().as_millis() as u64;
-        let values_len = values.len() as isize;
-        let v = Value::new_hash(values, created_at);
-        let size = calculate_record_size(key.len(), v.size());
-        self.current_memory += size;
-        if !self.cleanup(start_time) {
-            self.current_memory -= size;
-            return Err(build_out_of_memory_error());
-        }
-        let created_at = v.last_access_time.load(Ordering::Relaxed);
-        let expires_at = v.expires_at;
-        match self.map.get_mut(key) {
-            Some(existing) => {
-                let size_before = existing.size();
-                let inserted = existing.merge(v.get_hvalue().unwrap())?;
-                self.current_memory -= size_before;
-                self.current_memory += existing.size();
-                Ok(inserted)
-            }
-            None => {
-                self.map.insert(key.clone(), v);
-                self.aux_maps.write().unwrap().add(key, created_at, expires_at, self.cleanup_using_lru);
-                Ok(values_len)
-            }
-        }
+        self.maps.add_or_update(key, HashMapValue(values), start_time,
+                                |existing, new|existing.merge(new.get_hvalue().unwrap()))
     }
 
     pub fn hdel(&mut self, key: &Vec<u8>, values: HashSet<&Vec<u8>>) -> Result<isize, Error> {
-        match self.map.get_mut(key) {
-            Some(existing) => {
-                let size_before = existing.size();
-                let (deleted, l) = existing.delete(values)?;
-                self.current_memory -= size_before;
-                self.current_memory += existing.size();
-                if l == 0 {
-                    self.removekey(key);
-                }
-                Ok(deleted)
-            }
-            None => Ok(0),
-        }
+        self.maps.update(key, |v|v.delete(values))
     }
 
     pub fn size(&self) -> usize {

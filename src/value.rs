@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::io::Error;
 use crate::errors::build_wrong_data_type_error;
+use crate::generic_maps::SizedValue;
 use crate::value::ValueHolder::{HashMapValue, HashSetValue, IntValue, StringValue};
 
 pub enum ValueHolder {
@@ -18,8 +19,8 @@ fn calculate_set_size(set: &HashSet<Vec<u8>>) -> usize {
     set.iter().map(|i|i.len()).sum()
 }
 
-impl ValueHolder {
-    pub fn size(&self) -> usize {
+impl SizedValue for ValueHolder {
+    fn size(&self) -> usize {
         match self {
             IntValue(_) => 8,
             StringValue(v) => v.len(),
@@ -28,6 +29,17 @@ impl ValueHolder {
         }
     }
 
+    fn len(&self) -> usize {
+        match self {
+            IntValue(_) => 1,
+            StringValue(v) => 1,
+            HashMapValue(m) => m.len(),
+            HashSetValue(s) => s.len()
+        }
+    }
+}
+
+impl ValueHolder {
     /*pub fn new(value: Vec<u8>) -> ValueHolder {
         StringValue(value)
         let expires_at = expiration.map(|e| created_at + e);
@@ -100,7 +112,7 @@ impl ValueHolder {
         Ok(inserted)
     }
 
-    pub fn delete(&mut self, source: HashSet<&Vec<u8>>) -> Result<(isize, usize), Error> {
+    pub fn delete(&mut self, source: HashSet<&Vec<u8>>) -> Result<isize, Error> {
         let hv = self.get_mut_hvalue().ok_or(build_wrong_data_type_error())?;
         let mut deleted = 0;
         for k in source {
@@ -108,6 +120,6 @@ impl ValueHolder {
                 deleted += 1;
             }
         }
-        Ok((deleted, hv.len()))
+        Ok(deleted)
     }
 }

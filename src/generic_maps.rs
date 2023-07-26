@@ -1,21 +1,28 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::Hash;
+use std::io::Error;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::RwLock;
 use std::time::SystemTime;
+use crate::errors::build_out_of_memory_error;
 
 pub trait RecordSizeCalculator<K, V> {
     fn calculate_record_size(&self, key: &K, value: &V) -> usize;
 }
 
-pub struct GenericValue<V> {
+pub trait SizedValue {
+    fn size(&self) -> usize;
+    fn len(&self) -> usize;
+}
+
+pub struct GenericValue<V: SizedValue> {
     value: V,
     last_access_time: AtomicU64,
     expires_at: Option<u64>,
     is_updated: bool
 }
 
-pub struct GenericMaps<K, V, C> {
+pub struct GenericMaps<K, V: SizedValue, C> {
     max_memory: usize,
     current_memory: usize,
     use_map_by_time: bool,
@@ -25,7 +32,17 @@ pub struct GenericMaps<K, V, C> {
     record_size_calculator: C
 }
 
-impl<V> GenericValue<V> {
+impl<V: SizedValue> SizedValue for GenericValue<V> {
+    fn size(&self) -> usize {
+        self.value.size()
+    }
+
+    fn len(&self) -> usize {
+        self.value.len()
+    }
+}
+
+impl<V: SizedValue> GenericValue<V> {
     pub fn new(value: V, created_at: u64, expiration: Option<u64>) -> GenericValue<V> {
         let expires_at = expiration.map(|e| created_at + e);
         GenericValue {
@@ -49,9 +66,13 @@ impl<V> GenericValue<V> {
     pub fn get_value(&self) -> &V {
         &self.value
     }
+
+    pub fn get_mut_value(&mut self) -> &mut V {
+        &mut self.value
+    }
 }
 
-impl<K: Eq + Hash + Clone, V, C: RecordSizeCalculator<K, V>> GenericMaps<K, V, C> {
+impl<K: Eq + Hash + Clone, V: SizedValue, C: RecordSizeCalculator<K, V>> GenericMaps<K, V, C> {
     pub fn new(use_map_by_time: bool, record_size_calculator: C, max_memory: usize) -> GenericMaps<K, V, C> {
         GenericMaps{
             max_memory,
@@ -193,5 +214,72 @@ impl<K: Eq + Hash + Clone, V, C: RecordSizeCalculator<K, V>> GenericMaps<K, V, C
             }
         }
         value
+    }
+
+    pub fn set(&mut self, key: &K, value: V, expiry: Option<u64>, start_time: SystemTime) -> Result<(), Error> {
+        let created_at = SystemTime::now().duration_since(start_time).unwrap().as_millis() as u64;
+        let v = GenericValue::new(value, created_at, expiry);
+        let size = self.record_size_calculator.calculate_record_size(key, v.get_value());
+        self.current_memory += size;
+        if !self.cleanup(start_time) {
+            self.current_memory -= size;
+            return Err(build_out_of_memory_error());
+        }
+        let v_size = v.size();
+        if let Some(old) = self.map.insert(key.clone(), v) {
+            self.current_memory = self.current_memory - size + v_size - old.size();
+            self.remove_from_aux_maps(key, &old);
+        }
+        self.add_to_aux_maps(key, &v);
+        Ok(())
+    }
+
+    pub fn add_or_update<F: Fn(&mut V, V) -> Result<isize, Error>>(&mut self, key: &K, value: V, start_time: SystemTime, update_func: F) -> Result<isize, Error> {
+        let created_at = SystemTime::now().duration_since(start_time).unwrap().as_millis() as u64;
+        let size = self.record_size_calculator.calculate_record_size(key, &value);
+        self.current_memory += size;
+        if !self.cleanup(start_time) {
+            self.current_memory -= size;
+            return Err(build_out_of_memory_error());
+        }
+        match self.map.get_mut(key) {
+            Some(existing) => {
+                let size_before = existing.size();
+                let result = match update_func(existing.get_mut_value(), value) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        self.current_memory -= size;
+                        return Err(e)
+                    }
+                };
+                self.current_memory -= size_before;
+                self.current_memory += existing.size();
+                Ok(result)
+            }
+            None => {
+                let value_len = value.len() as isize;
+                let v = GenericValue::new(value, created_at, None);
+                self.add_to_aux_maps(key, &v);
+                self.map.insert(key.clone(), v);
+                Ok(value_len)
+            }
+        }
+    }
+
+    pub fn update<F: Fn(&mut V) -> Result<isize, Error>>(&mut self, key: &K, update_func: F) -> Result<isize, Error> {
+        match self.map.get_mut(key) {
+            Some(existing) => {
+                let size_before = existing.size();
+                let result = update_func(existing.get_mut_value())?;
+                self.current_memory -= size_before;
+                let size_after = existing.size();
+                self.current_memory += size_after;
+                if size_after == 0 {
+                    self.removekey(key);
+                }
+                Ok(result)
+            }
+            None => Ok(0),
+        }
     }
 }
