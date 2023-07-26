@@ -1,7 +1,5 @@
 use std::collections::{HashMap, HashSet};
 use std::io::Error;
-use std::sync::atomic::AtomicU64;
-use std::time::SystemTime;
 use crate::errors::build_wrong_data_type_error;
 use crate::value::ValueHolder::{HashMapValue, HashSetValue, IntValue, StringValue};
 
@@ -21,7 +19,7 @@ fn calculate_set_size(set: &HashSet<Vec<u8>>) -> usize {
 }
 
 impl ValueHolder {
-    fn size(&self) -> usize {
+    pub fn size(&self) -> usize {
         match self {
             IntValue(_) => 8,
             StringValue(v) => v.len(),
@@ -29,16 +27,9 @@ impl ValueHolder {
             HashSetValue(s) => calculate_set_size(s)
         }
     }
-}
 
-pub struct Value {
-    value: ValueHolder,
-    pub last_access_time: AtomicU64,
-    pub expires_at: Option<u64>,
-}
-
-impl Value {
-    pub fn new(value: ValueHolder, created_at: u64, expiration: Option<u64>) -> Value {
+    /*pub fn new(value: Vec<u8>) -> ValueHolder {
+        StringValue(value)
         let expires_at = expiration.map(|e| created_at + e);
         Value {
             value,
@@ -61,55 +52,41 @@ impl Value {
             last_access_time: AtomicU64::new(created_at),
             expires_at: None,
         }
-    }
-
-    pub fn is_expired(&self, start_time: SystemTime) -> bool {
-        if let Some(e) = self.expires_at {
-            let now = SystemTime::now().duration_since(start_time).unwrap().as_millis() as u64;
-            if now >= e {
-                return true;
-            }
-        }
-        false
-    }
+    }*/
 
     pub fn get_value(&self) -> Option<&Vec<u8>> {
-        match &self.value {
+        match self {
             StringValue(v) => Some(v),
             _ => None
         }
     }
 
     pub fn get_ivalue(&self) -> Option<isize> {
-        match &self.value {
+        match self {
             IntValue(v) => Some(*v),
             _ => None
         }
     }
 
     pub fn get_hvalue(&self) -> Option<&HashMap<Vec<u8>, Vec<u8>>> {
-        match &self.value {
+        match self {
             HashMapValue(v) => Some(v),
             _ => None
         }
     }
 
     pub fn get_mut_hvalue(&mut self) -> Option<&mut HashMap<Vec<u8>, Vec<u8>>> {
-        match &mut self.value {
+        match self {
             HashMapValue(v) => Some(v),
             _ => None
         }
     }
 
     pub fn get_svalue(&self) -> Option<&HashSet<Vec<u8>>> {
-        match &self.value {
+        match self {
             HashSetValue(v) => Some(v),
             _ => None
         }
-    }
-
-    pub fn size(&self) -> usize {
-        self.value.size()
     }
 
     pub fn merge(&mut self, source: &HashMap<Vec<u8>, Vec<u8>>) -> Result<isize, Error> {

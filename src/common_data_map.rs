@@ -6,8 +6,6 @@ use crate::common_maps::{build_map, CommonMaps};
 
 pub struct CommonDataMap {
     map: Vec<RwLock<CommonMaps>>,
-    pub last_access_time: AtomicU64,
-    is_updated: AtomicBool
 }
 
 impl CommonDataMap {
@@ -18,8 +16,6 @@ impl CommonDataMap {
             map: (0..vector_size)
                 .map(|_i| RwLock::new(build_map(max_memory, cleanup_using_lru)))
                 .collect(),
-            last_access_time: AtomicU64::new(now),
-            is_updated: AtomicBool::new(false)
         })
     }
 

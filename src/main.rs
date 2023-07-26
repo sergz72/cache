@@ -10,6 +10,7 @@ mod worker_data;
 mod value;
 mod errors;
 mod common_data_map;
+mod generic_maps;
 
 use std::env::args;
 use std::io::{Error, Read, Write};

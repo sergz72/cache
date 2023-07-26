@@ -1,121 +1,29 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::io::Error;
 use std::sync::atomic::Ordering;
-use std::sync::RwLock;
 use std::time::SystemTime;
 use crate::common_maps::GetResult::{Expired, Found, NotFound, WrongValue};
 use crate::errors::build_out_of_memory_error;
+use crate::generic_maps::{GenericMaps, RecordSizeCalculator};
 use crate::resp_encoder::{resp_encode_binary_string, resp_encode_int, resp_encode_map};
 use crate::value::{Value, ValueHolder};
 
-struct AuxMaps {
-    map_by_time: BTreeMap<u64, HashSet<Vec<u8>>>,
-    map_by_expiration: BTreeMap<u64, HashSet<Vec<u8>>>,
-}
-
-impl AuxMaps {
-    fn new() -> AuxMaps {
-        AuxMaps { map_by_time: BTreeMap::new(), map_by_expiration: BTreeMap::new() }
-    }
-
-    fn update_map_by_time(&mut self, key: &Vec<u8>, value: &Value, start_time: SystemTime) {
-        let now = SystemTime::now().duration_since(start_time).unwrap().as_millis() as u64;
-        let old = value.last_access_time.swap(now, Ordering::Relaxed);
-        if now != old {
-            self.remove_from_map_by_time(key, old);
-            self.insert_into_map_by_time(key, now);
-        }
-    }
-
-    fn clear(&mut self) {
-        self.map_by_time.clear();
-        self.map_by_expiration.clear();
-    }
-
-    fn remove_from_map_by_time(&mut self, key: &Vec<u8>, value: u64) {
-        let h = self.map_by_time.get_mut(&value).unwrap();
-        if h.len() == 1 {
-            self.map_by_time.remove(&value);
-        } else {
-            h.remove(key);
-        }
-    }
-
-    fn first_value(&self) -> HashSet<Vec<u8>> {
-        self.map_by_time.first_key_value().unwrap().1.clone()
-    }
-
-    fn insert_into_map_by_time(&mut self, key: &Vec<u8>, created_at: u64) {
-        match self.map_by_time.get_mut(&created_at) {
-            Some(v) => { let _ = v.insert(key.clone()); }
-            None => {
-                let mut s = HashSet::new();
-                s.insert(key.clone());
-                self.map_by_time.insert(created_at, s);
-            }
-        };
-    }
-
-    fn remove(&mut self, key: &Vec<u8>, expires_at: Option<u64>, last_access_time: u64, cleanup_using_lru: bool) {
-        if let Some(ex) = expires_at {
-            let h = self.map_by_expiration.get_mut(&ex).unwrap();
-            if h.len() == 1 {
-                self.map_by_expiration.remove(&ex);
-            } else {
-                h.remove(key);
-            }
-        }
-        if cleanup_using_lru {
-            self.remove_from_map_by_time(key, last_access_time);
-        }
-    }
-
-    fn remove_expired(&self, start_time: SystemTime) -> Vec<Vec<u8>> {
-        let now = SystemTime::now().duration_since(start_time).unwrap().as_millis() as u64;
-        let mut to_remove = Vec::new();
-        for (k, v) in &self.map_by_expiration {
-            let kk = *k;
-            if kk < now {
-                for k in v {
-                    to_remove.push(k.clone());
-                }
-            }
-        }
-        to_remove
-    }
-
-    fn add(&mut self, key: &Vec<u8>, created_at: u64, expires_at: Option<u64>, cleanup_using_lru: bool) {
-        if let Some(ex) = expires_at {
-            match self.map_by_expiration.get_mut(&ex) {
-                Some(v) => { let _ = v.insert(key.clone()); }
-                None => {
-                    let mut s = HashSet::new();
-                    s.insert(key.clone());
-                    self.map_by_expiration.insert(ex, s);
-                }
-            };
-        }
-        if cleanup_using_lru {
-            self.insert_into_map_by_time(key, created_at);
-        }
+struct ValueHolderSizeCalculator{}
+impl RecordSizeCalculator<Vec<u8>, ValueHolder> for ValueHolderSizeCalculator {
+    fn calculate_record_size(&self, key: &Vec<u8>, value: &ValueHolder) -> usize {
+        3 * key.len() + value.size() + 16
     }
 }
 
 pub struct CommonMaps {
     cleanup_using_lru: bool,
-    max_memory: usize,
-    current_memory: usize,
-    map: HashMap<Vec<u8>, Value>,
-    aux_maps: RwLock<AuxMaps>,
+    maps: GenericMaps<Vec<u8>, ValueHolder, ValueHolderSizeCalculator>,
 }
 
 pub fn build_map(max_memory: usize, cleanup_using_lru: bool) -> CommonMaps {
     CommonMaps {
         cleanup_using_lru,
-        current_memory: 0,
-        max_memory,
-        map: HashMap::new(),
-        aux_maps: RwLock::new(AuxMaps::new()),
+        maps: GenericMaps::new(cleanup_using_lru, ValueHolderSizeCalculator{}, max_memory)
     }
 }
 
@@ -133,30 +41,13 @@ fn calculate_record_size(key_size: usize, value_size: usize) -> usize {
 
 impl CommonMaps {
     pub fn flush(&mut self) -> usize {
-        self.current_memory = 0;
-        let counter = self.map.len();
-        self.map.clear();
-        self.aux_maps.write().unwrap().clear();
+        let counter = self.maps.len();
+        self.maps.clear();
         counter
     }
 
-    pub fn removekey(&mut self, key: &Vec<u8>) -> isize {
-        if let Some(value) = self.map.remove(key) {
-            self.current_memory -= calculate_record_size(key.len(), value.size());
-            self.aux_maps.write().unwrap().remove(key, value.expires_at,
-                                                  value.last_access_time.load(Ordering::Relaxed),
-                                                  self.cleanup_using_lru);
-            return 1;
-        }
-        0
-    }
-
-    pub fn removekeys(&mut self, keys: Vec<&Vec<u8>>) -> isize {
-        keys.into_iter().map(|k| self.removekey(k)).sum()
-    }
-
     pub fn get(&self, key: &Vec<u8>, result: &mut Vec<u8>, start_time: SystemTime) -> GetResult {
-        return match self.map.get(key) {
+        return match self.maps.get(key) {
             Some(value) => {
                 if value.is_expired(start_time) {
                     Expired
@@ -220,29 +111,6 @@ impl CommonMaps {
             }
             None => NotFound
         };
-    }
-
-    fn remove_expired(&mut self, start_time: SystemTime) {
-        let to_remove = self.aux_maps.read().unwrap().remove_expired(start_time);
-        for k in to_remove {
-            self.removekey(&k);
-        }
-    }
-
-    fn cleanup(&mut self, start_time: SystemTime) -> bool {
-        if self.current_memory >= self.max_memory {
-            self.remove_expired(start_time);
-            if self.cleanup_using_lru {
-                while self.current_memory >= self.max_memory {
-                    //remove by lru
-                    let v = self.aux_maps.read().unwrap().first_value();
-                    v.clone().iter().for_each(|k| { let _ = self.removekey(k); });
-                }
-            } else if self.current_memory >= self.max_memory {
-                return false;
-            }
-        }
-        true
     }
 
     pub fn set(&mut self, key: &Vec<u8>, value: ValueHolder, expiry: Option<u64>, start_time: SystemTime) -> Result<(), Error> {
@@ -312,7 +180,7 @@ impl CommonMaps {
     }
 
     pub fn size(&self) -> usize {
-        self.map.len()
+        self.maps.len()
     }
 }
 
