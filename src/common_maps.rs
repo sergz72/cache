@@ -4,9 +4,9 @@ use std::sync::atomic::Ordering;
 use std::time::SystemTime;
 use crate::common_maps::GetResult::{Expired, Found, NotFound, WrongValue};
 use crate::errors::build_out_of_memory_error;
-use crate::generic_maps::{GenericMaps, RecordSizeCalculator};
+use crate::generic_maps::{GenericMaps, GenericValue, RecordSizeCalculator};
 use crate::resp_encoder::{resp_encode_binary_string, resp_encode_int, resp_encode_map};
-use crate::value::{Value, ValueHolder};
+use crate::value::ValueHolder;
 
 struct ValueHolderSizeCalculator{}
 impl RecordSizeCalculator<Vec<u8>, ValueHolder> for ValueHolderSizeCalculator {
@@ -35,10 +35,6 @@ pub enum GetResult {
     WrongValue,
 }
 
-fn calculate_record_size(key_size: usize, value_size: usize) -> usize {
-    3 * key_size + value_size + 16
-}
-
 impl CommonMaps {
     pub fn flush(&mut self) -> usize {
         let counter = self.maps.len();
@@ -47,21 +43,15 @@ impl CommonMaps {
     }
 
     pub fn get(&self, key: &Vec<u8>, result: &mut Vec<u8>, start_time: SystemTime) -> GetResult {
-        return match self.maps.get(key) {
+        return match self.maps.get(key, start_time) {
             Some(value) => {
                 if value.is_expired(start_time) {
                     Expired
-                } else if let Some(v) = value.get_value() {
+                } else if let Some(v) = value.get_value().get_value() {
                     resp_encode_binary_string(v, result);
-                    if self.cleanup_using_lru {
-                        self.aux_maps.write().unwrap().update_map_by_time(key, value, start_time);
-                    }
                     Found
-                } else if let Some(v) = value.get_ivalue() {
+                } else if let Some(v) = value.get_value().get_ivalue() {
                     resp_encode_int(v, result);
-                    if self.cleanup_using_lru {
-                        self.aux_maps.write().unwrap().update_map_by_time(key, value, start_time);
-                    }
                     Found
                 } else {
                     WrongValue
@@ -72,16 +62,13 @@ impl CommonMaps {
     }
 
     pub fn hget(&self, key: &Vec<u8>, map_key: &Vec<u8>, result: &mut Vec<u8>, start_time: SystemTime) -> GetResult {
-        return match self.map.get(key) {
+        return match self.maps.get(key, start_time) {
             Some(value) => {
                 if value.is_expired(start_time) {
                     Expired
-                } else if let Some(v) = value.get_hvalue() {
+                } else if let Some(v) = value.get_value().get_hvalue() {
                     if let Some(vv) = v.get(map_key) {
                         resp_encode_binary_string(vv, result);
-                        if self.cleanup_using_lru {
-                            self.aux_maps.write().unwrap().update_map_by_time(key, value, start_time);
-                        }
                         Found
                     } else {
                         NotFound
@@ -95,15 +82,12 @@ impl CommonMaps {
     }
 
     pub fn hgetall(&self, key: &Vec<u8>, result: &mut Vec<u8>, start_time: SystemTime) -> GetResult {
-        return match self.map.get(key) {
+        return match self.maps.get(key, start_time) {
             Some(value) => {
                 if value.is_expired(start_time) {
                     Expired
-                } else if let Some(v) = value.get_hvalue() {
+                } else if let Some(v) = value.get_value().get_hvalue() {
                     resp_encode_map(v, result);
-                    if self.cleanup_using_lru {
-                        self.aux_maps.write().unwrap().update_map_by_time(key, value, start_time);
-                    }
                     Found
                 } else {
                     WrongValue
@@ -115,7 +99,7 @@ impl CommonMaps {
 
     pub fn set(&mut self, key: &Vec<u8>, value: ValueHolder, expiry: Option<u64>, start_time: SystemTime) -> Result<(), Error> {
         let created_at = SystemTime::now().duration_since(start_time).unwrap().as_millis() as u64;
-        let v = Value::new(value, created_at, expiry);
+        let v = GenericValue::new(value, created_at, expiry);
         let size = calculate_record_size(key.len(), v.size());
         self.current_memory += size;
         if !self.cleanup(start_time) {

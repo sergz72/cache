@@ -1,13 +1,14 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::Hash;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::RwLock;
 use std::time::SystemTime;
 
 pub trait RecordSizeCalculator<K, V> {
     fn calculate_record_size(&self, key: &K, value: &V) -> usize;
 }
 
-struct GenericValue<V> {
+pub struct GenericValue<V> {
     value: V,
     last_access_time: AtomicU64,
     expires_at: Option<u64>,
@@ -19,7 +20,7 @@ pub struct GenericMaps<K, V, C> {
     current_memory: usize,
     use_map_by_time: bool,
     map: HashMap<K, GenericValue<V>>,
-    map_by_time: BTreeMap<u64, HashSet<K>>,
+    map_by_time: RwLock<BTreeMap<u64, HashSet<K>>>,
     map_by_expiration: BTreeMap<u64, HashSet<K>>,
     record_size_calculator: C
 }
@@ -44,6 +45,10 @@ impl<V> GenericValue<V> {
         }
         false
     }
+
+    pub fn get_value(&self) -> &V {
+        &self.value
+    }
 }
 
 impl<K: Eq + Hash + Clone, V, C: RecordSizeCalculator<K, V>> GenericMaps<K, V, C> {
@@ -53,13 +58,13 @@ impl<K: Eq + Hash + Clone, V, C: RecordSizeCalculator<K, V>> GenericMaps<K, V, C
             current_memory: 0,
             use_map_by_time,
             map: HashMap::new(),
-            map_by_time: BTreeMap::new(),
+            map_by_time: RwLock::new(BTreeMap::new()),
             map_by_expiration: BTreeMap::new(),
             record_size_calculator
         }
     }
 
-    fn update_map_by_time(&mut self, key: &K, value: &GenericValue<V>, start_time: SystemTime) {
+    fn update_map_by_time(&self, key: &K, value: &GenericValue<V>, start_time: SystemTime) {
         let now = SystemTime::now().duration_since(start_time).unwrap().as_millis() as u64;
         let old = value.last_access_time.swap(now, Ordering::Relaxed);
         if now != old {
@@ -71,30 +76,32 @@ impl<K: Eq + Hash + Clone, V, C: RecordSizeCalculator<K, V>> GenericMaps<K, V, C
     pub fn clear(&mut self) {
         self.current_memory = 0;
         self.map.clear();
-        self.map_by_time.clear();
+        self.map_by_time.write().unwrap().clear();
         self.map_by_expiration.clear();
     }
 
-    fn remove_from_map_by_time(&mut self, key: &K, value: u64) {
-        let h = self.map_by_time.get_mut(&value).unwrap();
+    fn remove_from_map_by_time(&self, key: &K, value: u64) {
+        let mut lock = self.map_by_time.write().unwrap();
+        let h = lock.get_mut(&value).unwrap();
         if h.len() == 1 {
-            self.map_by_time.remove(&value);
+            lock.remove(&value);
         } else {
             h.remove(key);
         }
     }
 
     fn first_value(&self) -> HashSet<K> {
-        self.map_by_time.first_key_value().unwrap().1.clone()
+        self.map_by_time.read().unwrap().first_key_value().unwrap().1.clone()
     }
 
-    fn insert_into_map_by_time(&mut self, key: &K, created_at: u64) {
-        match self.map_by_time.get_mut(&created_at) {
+    fn insert_into_map_by_time(&self, key: &K, created_at: u64) {
+        let mut lock = self.map_by_time.write().unwrap();
+        match lock.get_mut(&created_at) {
             Some(v) => { let _ = v.insert(key.clone()); }
             None => {
                 let mut s = HashSet::new();
                 s.insert(key.clone());
-                self.map_by_time.insert(created_at, s);
+                lock.insert(created_at, s);
             }
         };
     }
@@ -176,5 +183,15 @@ impl<K: Eq + Hash + Clone, V, C: RecordSizeCalculator<K, V>> GenericMaps<K, V, C
             }
         }
         true
+    }
+
+    pub fn get(&self, key: &K, start_time: SystemTime) -> Option<&GenericValue<V>> {
+        let value = self.map.get(key);
+        if self.use_map_by_time {
+            if let Some(v) = value {
+                self.update_map_by_time(key, v, start_time)
+            }
+        }
+        value
     }
 }
